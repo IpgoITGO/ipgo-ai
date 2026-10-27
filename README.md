@@ -30,3 +30,4 @@ flowchart LR
 - [작업 흐름](docs/rules/workflow.md)
 - [작성 규칙](docs/rules/conventions.md)
 - [안전 규칙](docs/rules/safety.md)
+- [AI 인사이트 prompt 규칙과 기본 문장](docs/ai-insight/prompt-and-fallback.md)
