@@ -75,3 +75,8 @@ def test_unknown_field_is_rejected():
 def test_clean_request_needs_at_least_one_file():
     with pytest.raises(ValidationError):
         CleanRequest.model_validate({**CLEAN_REQUEST, "files": []})
+
+
+def test_not_calculable_without_reason_is_rejected():
+    with pytest.raises(ValidationError):
+        ProductResult(product_id=121, status=ResultStatus.NOT_CALCULABLE)

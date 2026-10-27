@@ -72,3 +72,13 @@ def test_unexpected_error_hides_internals(client, monkeypatch):
     assert res.status_code == 500
     assert res.json()["code"] == "ENGINE_ERROR"
     assert "secret" not in res.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "status", "code"),
+    [("get", "/engine/unknown", 404, "NOT_FOUND"), ("get", "/engine/calculate", 405, "METHOD_NOT_ALLOWED")],
+)
+def test_http_errors_use_spec_error_format(client, method, path, status, code):
+    res = client.request(method, path)
+    assert res.status_code == status
+    assert res.json()["code"] == code

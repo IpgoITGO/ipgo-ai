@@ -41,6 +41,8 @@ flowchart LR
 | HTTP | code | 언제 |
 |---|---|---|
 | 422 | `INVALID_INPUT` | 요청이 스키마와 다름 (명세에 없는 필드 포함). `details.errors`에 칸 이름 |
+| 404 | `NOT_FOUND` | 없는 경로 |
+| 405 | `METHOD_NOT_ALLOWED` | 경로는 있지만 지원하지 않는 요청 방식 |
 | 501 | `NOT_IMPLEMENTED` | 아직 구현하지 않은 기능 |
 | 501 | `STORAGE_NOT_CONFIGURED` | 원본 파일 저장 위치 미정 |
 | 501 | `DATABASE_NOT_CONFIGURED` | DB 연결 미정 |

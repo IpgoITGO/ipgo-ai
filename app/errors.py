@@ -4,6 +4,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from schemas.base import ErrorResponse
 
@@ -21,15 +22,28 @@ class AppError(Exception):
         self.details = details
 
 
-def _json(status: int, code: str, message: str, details: dict | None = None) -> JSONResponse:
+_HTTP_ERRORS = {
+    404: ("NOT_FOUND", "없는 경로예요"),
+    405: ("METHOD_NOT_ALLOWED", "이 경로에서 지원하지 않는 요청 방식이에요"),
+}
+
+
+def _json(
+    status: int, code: str, message: str, details: dict | None = None, headers: dict | None = None
+) -> JSONResponse:
     body = ErrorResponse(code=code, message=message, details=details).to_json_dict()
-    return JSONResponse(status_code=status, content=body)
+    return JSONResponse(status_code=status, content=body, headers=headers)
 
 
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(_: Request, exc: AppError):
         return _json(exc.status, exc.code, exc.message, exc.details)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_error(_: Request, exc: StarletteHTTPException):
+        code, message = _HTTP_ERRORS.get(exc.status_code, ("HTTP_ERROR", str(exc.detail)))
+        return _json(exc.status_code, code, message, headers=exc.headers)  # 405의 Allow 헤더 유지
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError):

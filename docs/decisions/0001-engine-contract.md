@@ -15,9 +15,10 @@
 | 7 | 소수 · 정수 | 엔진은 소수. 정수는 입고 단위로 올린 수량(권장 · 시나리오)과 금액뿐 | 기획서 "계산은 소수점까지, 화면에는 정수", ERD NUMERIC(18,3) |
 | 8 | LOW 등급 예측 범위 | calculate 응답 `forecastRangeLow/High`, LOW일 때만 값 | `calculation_results`에 저장 |
 | 9 | 명세에 없는 필드 | 422 `INVALID_INPUT`으로 거부 | 필드 이름 오타를 바로 발견 |
-| 10 | 오류 형식 | `{"code", "message", "details"}` | 명세 1장과 같아 Spring 변환이 쉬움 |
+| 10 | 오류 형식 | `{"code", "message", "details"}`. 404 · 405도 같은 형식 | 명세 1장과 같아 Spring 변환이 쉬움 |
 | 11 | mock 응답 | `ENGINE_MODE=mock`이면 명세 예시 반환 | 백엔드가 엔진 구현을 기다리지 않음 |
 | 12 | 브랜치 · 의존성 · CI | 저장소 규칙(`feature/<issue>-*` → `dev`), `requirements/` 분리와 버전 고정, PR마다 ruff · pytest | 새 환경에서도 같은 결과 |
+| 13 | 계산 불가 이유 | `NOT_CALCULABLE` · `EXCLUDED` · `REUPLOAD_REQUIRED`면 `reason` 필수. 없으면 스키마가 거부 | 0개로 바꾸지 않는 규칙을 코드로 보장 (`REUPLOAD_REQUIRED` 포함 여부는 백엔드 확인) |
 
 ## 미정
 

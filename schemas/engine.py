@@ -10,7 +10,7 @@
 """
 from datetime import date
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .base import (
     AccuracyGrade,
@@ -179,12 +179,15 @@ class ScenarioResult(CamelModel):
     daily_projection: list[DailyProjection] = []
 
 
+_REASON_REQUIRED = {ResultStatus.NOT_CALCULABLE, ResultStatus.EXCLUDED, ResultStatus.REUPLOAD_REQUIRED}
+
+
 class ProductResult(CamelModel):
     """SKU 하나의 계산 결과 → calculation_results 1행 + scenario_results N행."""
 
     product_id: int
     status: ResultStatus
-    reason: str | None = None               # NOT_CALCULABLE · EXCLUDED면 필수 (0개로 바꾸지 않는다)
+    reason: str | None = None               # NOT_CALCULABLE · EXCLUDED · REUPLOAD_REQUIRED면 필수
 
     # 계산 근거 (FE-05 · K1 result)
     method: Method | None = None
@@ -216,6 +219,13 @@ class ProductResult(CamelModel):
     forecast_range_high: float | None = None
 
     scenarios: list[ScenarioResult] = []    # 권장량 0개면 빈 목록
+
+    @model_validator(mode="after")
+    def _reason_required(self) -> ProductResult:
+        """계산 불가 · 제외 결과는 이유 없이 내보내지 않는다 (0개로 바꾸지 않는다)."""
+        if self.status in _REASON_REQUIRED and not self.reason:
+            raise ValueError(f"status가 {self.status}이면 reason이 필요해요")
+        return self
 
 
 class CalculateResponse(CamelModel):
