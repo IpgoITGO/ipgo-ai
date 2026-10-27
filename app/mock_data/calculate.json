@@ -1,0 +1,30 @@
+{
+  "engineVersion": "0.1.0-mock",
+  "results": [
+    {
+      "productId": 101, "status": "OK", "reason": null,
+      "method": "A", "methodReason": "평가 결과 기본 방식", "multiplier": 1.05, "horizonDays": 34,
+      "forecastOutboundQty": 101.2, "startStockQty": 39.6, "startStockEstimated": true,
+      "plannedReceiptsInHorizon": 0, "preArrivalUnmetQty": 0, "requiredQtyBeforeRounding": 66.66,
+      "recommendedQty": 72, "recommendedAmount": 129600, "expectedShortageOn": "2026-10-22",
+      "preArrivalRisk": 0.04, "riskSampleSize": 38, "riskStatus": "OK",
+      "accuracyGrade": "HIGH", "validObservationDays": 412, "coverSuccessCount": 9, "coverTrialCount": 10,
+      "forecastErrorRate": 0.12, "forecastRangeLow": null, "forecastRangeHigh": null,
+      "scenarios": [
+        {"type": "P80", "qty": 60, "isDuplicate": false, "expectedDepletionOn": "2026-11-18",
+         "expectedEndingStock": 0, "unmetDemandQty": 5.8, "postArrivalRisk": 0.25,
+         "dailyProjection": [{"date": "2026-10-15", "closingQty": 36.6}]},
+        {"type": "P100", "qty": 72, "isDuplicate": false, "expectedDepletionOn": null,
+         "expectedEndingStock": 6.2, "unmetDemandQty": 0, "postArrivalRisk": 0.08,
+         "dailyProjection": [{"date": "2026-10-15", "closingQty": 36.6}]},
+        {"type": "P120", "qty": 96, "isDuplicate": false, "expectedDepletionOn": null,
+         "expectedEndingStock": 30.2, "unmetDemandQty": 0, "postArrivalRisk": 0.02,
+         "dailyProjection": [{"date": "2026-10-15", "closingQty": 36.6}]}
+      ]
+    },
+    {
+      "productId": 121, "status": "NOT_CALCULABLE",
+      "reason": "판매한 날(유효 관측일)이 7일보다 적어요", "validObservationDays": 5
+    }
+  ]
+}

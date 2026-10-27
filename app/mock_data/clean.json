@@ -1,0 +1,33 @@
+{
+  "periodStart": "2026-09-01",
+  "periodEnd": "2026-10-14",
+  "asOfDate": "2026-10-14",
+  "products": [
+    {"skuBarcode": "8800272420016", "skuName": "케어트릿 120g", "unitCost": 1800, "isNew": false}
+  ],
+  "inventoryUnits": [
+    {"sourceInventoryKey": "MK0000000125086", "skuBarcode": "8800272420016", "receivedOn": "2026-09-02"}
+  ],
+  "unitDailyRecords": [
+    {"uploadFileId": 21, "sourceInventoryKey": "MK0000000125086", "receivedOn": "2026-09-02",
+     "stockDate": "2026-10-14", "openingQty": 58, "inboundQty": 0, "outboundQty": 3, "adjustmentQty": 0,
+     "closingQty": 55, "sourceSheet": "재고변동", "sourceRow": 12}
+  ],
+  "productDailyStocks": [
+    {"uploadFileId": 21, "skuBarcode": "8800272420016", "stockDate": "2026-09-08", "openingQty": 0,
+     "inboundQty": 0, "outboundQty": 0, "adjustmentQty": 0, "closingQty": 0,
+     "isValidObservation": false, "observationNote": "시작재고 0(미관측)"},
+    {"uploadFileId": 21, "skuBarcode": "8800272420016", "stockDate": "2026-10-14", "openingQty": 58,
+     "inboundQty": 0, "outboundQty": 3, "adjustmentQty": 0, "closingQty": 55,
+     "isValidObservation": true, "observationNote": null}
+  ],
+  "validation": {
+    "checkedSkuCount": 159,
+    "targetSkuCount": 158,
+    "excludedSkus": [
+      {"skuBarcode": "8800272421082", "skuName": "덴탈껌 M 5입", "date": "2026-09-12",
+       "reason": "전날 재고 + 입고 − 출고 ± 조정이 당일 재고와 3개 달라요"}
+    ]
+  },
+  "estimatedReviewCycleDays": 29
+}

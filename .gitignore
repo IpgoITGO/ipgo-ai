@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# 비밀값
+.env
+
+# 실제 데이터는 commit하지 않음 (docs/rules/safety.md)
+data/
+*.xlsx
+*.xls
+!tests/fixtures/*.xlsx
+
+# OS · 편집기
+.DS_Store
+.idea/
+.vscode/

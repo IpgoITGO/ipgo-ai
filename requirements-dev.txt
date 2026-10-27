@@ -1,0 +1,4 @@
+# 로컬 개발 · CI용
+-r requirements.txt
+-r requirements/dev.txt
+-r requirements/eval.txt
