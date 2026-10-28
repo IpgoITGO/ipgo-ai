@@ -1,0 +1,27 @@
+{
+  "engineVersion": "0.1.0-mock",
+  "selectedMethod": "B", "selectedMultiplier": 1.05,
+  "selectionReason": "A의 WAPE가 B보다 10% 이상 낮지 않아 B 선정, 커버 목표를 만족하는 최소 배수 1.05",
+  "targetMet": true,
+  "methodErrors": [
+    {"period": "TUNE", "method": "A", "mae": 12.4, "wape": 0.31, "sampleSize": 420},
+    {"period": "TUNE", "method": "B", "mae": 11.9, "wape": 0.29, "sampleSize": 465}
+  ],
+  "multiplierMetrics": [
+    {"multiplier": 1.00, "coverSuccessRate": 0.82, "excessRate": 0.10, "meetsTarget": false},
+    {"multiplier": 1.05, "coverSuccessRate": 0.90, "excessRate": 0.14, "meetsTarget": true}
+  ],
+  "actualInboundComparison": [
+    {"productId": 101, "engineShortageDays": 0, "engineAverageStock": 41.5,
+     "actualShortageDays": 3, "actualAverageStock": 52.0}
+  ],
+  "scenarioReliability": {
+    "endingStockMae": 7.3,
+    "riskBuckets": [{"low": 0.0, "high": 0.1, "actualStockoutRate": 0.06, "cases": 54}]
+  },
+  "skuAccuracy": [
+    {"productId": 101, "grade": "HIGH", "validObservationDays": 412, "coverSuccessCount": 9,
+     "coverTrialCount": 10, "forecastErrorRate": 0.12,
+     "history": [{"originDate": "2026-08-01", "forecastQty": 98.4, "actualQty": 101, "covered": true}]}
+  ]
+}

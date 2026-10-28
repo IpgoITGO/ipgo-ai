@@ -1,0 +1,3 @@
+{"validation": "PASSED",
+ "draft": "권장량 {qty_p100}개는 다음 입고 때 {ending_p100}개만 남기면서 품절 위험을 {risk_post_p100}로 낮춰요. {qty_p80}개로 줄이면 품절 위험이 {risk_post_p80}로 올라가요.",
+ "failReason": null, "latencyMs": 1840, "costUsd": 0.0021}

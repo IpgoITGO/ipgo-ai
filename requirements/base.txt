@@ -1,0 +1,5 @@
+# 공통 — 서버 실행에 필요
+fastapi==0.146.0
+uvicorn==0.40.0
+pydantic==2.13.4
+python-dotenv==1.2.1
