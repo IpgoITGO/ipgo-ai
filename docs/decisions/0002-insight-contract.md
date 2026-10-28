@@ -55,7 +55,7 @@ prompt가 정상 · 확인 필요 · 판단 보류를 구분하려면 이름 목
 | `recommended` | `ScenarioType` | 권장 시나리오 | 유지 |
 | `scenarios` | `["P80", "P100", "P120"]` | 설명할 시나리오 (중복 제외) | 추가 |
 | `methodFallback` | bool | 기본 산식 대신 다른 산식을 썼는지 → 확인 필요 | 추가 |
-| `hasNoDateReceipts` | bool | 도착 예정일 없는 발주가 있는지 → 확인 필요 | 추가 (5장 확인 필요) |
+| `hasNoDateReceipts` | bool | 도착 예정일 없는 발주가 있는지 → 확인 필요 | 추가 (3-8) |
 | `placeholders` | `{"qty_p100": "1,240", ...}` | 자리 표시자 이름과 값 | 목록 → dict |
 | `directions` | `{"risk_post_p80_vs_p100": "높음", ...}` | 권장량 대비 방향 | 유지 |
 
@@ -99,7 +99,7 @@ prompt가 정상 · 확인 필요 · 판단 보류를 구분하려면 이름 목
 | `cover_days` | `horizon_days` | |
 | `current_stock` | `start_stock` | |
 | `pending_qty` | `planned_receipts` | 커버 기간 안 도착분 |
-| `unreflected_qty` | `no_date_receipts` | 5장 확인 필요 |
+| `unreflected_qty` | `no_date_receipts` | 3-8 |
 | `cannot_reason` | `reason` | |
 | `formula` · `formula_reason` | `method` · `method_reason` | |
 | `formula_desc` | 없음 | 산식별 고정 문구 → `insight/` 상수 |
@@ -107,7 +107,7 @@ prompt가 정상 · 확인 필요 · 판단 보류를 구분하려면 이름 목
 | `multiplier` | `multiplier` | |
 | `recent_28d_avg` | 없음 | `ProductResult`에 없음. 필요하면 요청 |
 | `risk_before` | `risk_pre` | |
-| `risk_basis` | 미정 | 5장 pooled 결정에 따름 |
+| `risk_basis` | 없음 | pooled 미사용 (3-8) |
 | `sample_n` | `risk_sample_size` | |
 | `qty.K` · `remain.K` · `deplete.K` · `unmet.K` | `qty_pK` · `ending_pK` · `depletion_pK` · `unmet_pK` | `ScenarioResult` |
 | `risk_after.K` | `risk_post_pK` | |
@@ -139,6 +139,13 @@ LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시�
 
 명세가 바뀌는 항목이라 합의 후 명세 → `schemas/` → Spring 순서로 반영합니다.
 
+### 3-8. 엔진 쪽 결정 (장준영, 2026-10-28)
+
+| 항목 | 결정 | 이유 | 인사이트 영향 |
+|---|---|---|---|
+| pooled 위험 | 쓰지 않음. 표본이 부족하면 `riskStatus=INSUFFICIENT_SAMPLE`, 위험 값 없음 | 이력이 짧은 상품은 실제 오차가 큰데, 전체 표본은 안정적인 상품이 대부분이라 위험이 낮게 나오기 쉬움. 나중에 `RiskStatus` 값을 추가해 넣을 수 있음 | `risk_basis` 삭제. 실제 데이터로 `INSUFFICIENT_SAMPLE` 비율을 본 뒤 다시 검토 |
+| 도착 예정일 없는 발주 | `CalculateRequest.noDateReceipts: [{productId, quantity}]`로 받아 `ProductResult.noDateReceiptQty`와 InsightInput에 넘김. **계산에는 쓰지 않음** | InsightInput을 엔진 한 곳에서 만듦(3-1). `plannedReceipts`와 필드를 나눠 계산에 섞이지 않게 함 | `hasNoDateReceipts`와 `no_date_receipts` 자리 표시자 사용 가능 |
+
 ## 4. 상태 매핑 (#4 문서 1장 갱신용)
 
 여러 조건이 겹치면 `산출 불가 > 판단 보류 > 확인 필요 > 정상` 순서로 하나만 고르는 규칙은 그대로입니다. 판정은 `insight/`가 InsightInput만 보고 합니다.
@@ -156,8 +163,7 @@ LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시�
 
 | 항목 | 내용 | 확인할 사람 |
 |---|---|---|
-| pooled 위험 | 표본이 부족할 때 전체 상품 표본으로 위험을 추정할지, `INSUFFICIENT_SAMPLE`로 끝낼지. 안 하면 `risk_basis` 삭제 | 장준영 |
-| 도착 예정일 없는 발주 | 지금은 Spring이 빼고 보내서 엔진이 모름. `CalculateRequest`에 수량을 함께 받을지 | 장준영 · 백엔드 |
+| 도착 예정일 없는 발주 | 3-8의 `CalculateRequest.noDateReceipts`를 Spring이 보낼 수 있는지 | 백엔드 |
 | 화면 값 형식 | 소수인 재고(`ending` · `start_stock`)를 `placeholders`에 어떻게 넣을지. 0001 미정 "화면 정수 표시 규칙"에 따름 | 프론트 · 백엔드 |
 | 직접 입력 시나리오 | `/engine/scenarios`로 `CUSTOM`이 생기면 인사이트를 다시 만들지, 입력은 누가 갱신할지 | 이석형 · 백엔드 |
 | `EXCLUDED` · `REUPLOAD_REQUIRED` | 인사이트 문장을 보여 줄지, Spring이 호출하지 않을지 | 백엔드 |
@@ -166,7 +172,7 @@ LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시�
 ## 합의 후 할 일
 
 - [ ] 이 문서 상태를 "결정"으로 바꾸고 날짜 기록, 0001 미정의 자리 표시자 항목 닫기
-- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput`) 수정 — 장준영
+- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput` · `noDateReceipts` · `noDateReceiptQty`) 수정 — 장준영
 - [ ] `engine/insight_facts.py`로 `build_catalog` 이식, 이석형 님 리뷰 — 장준영
 - [ ] `insight/`로 기존 코드 이동, 이름 · 상태값 교체, 검사기 정규식 갱신 — 이석형
 - [ ] #4 문서(prompt · template) 자리 표시자 이름과 상태 매핑 갱신 — 이석형
