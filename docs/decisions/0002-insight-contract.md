@@ -54,7 +54,8 @@ prompt가 정상 · 확인 필요 · 판단 보류를 구분하려면 이름 목
 | `riskStatus` | `RiskStatus` | 판단 보류 판정 | 유지 |
 | `recommended` | `ScenarioType` | 권장 시나리오 | 유지 |
 | `scenarios` | `["P80", "P100", "P120"]` | 설명할 시나리오 (중복 제외) | 추가 |
-| `methodFallback` | bool | 기본 산식 대신 다른 산식을 썼는지 → 확인 필요 | 추가 |
+| `methodFallback` | bool | 기본 산식 대신 다른 산식을 썼는지 → 산식 사유 문장 | 추가 |
+| `startStockEstimated` | bool | 시작 재고가 추정값인지 → 확인 필요 | 추가 |
 | `hasNoDateReceipts` | bool | 도착 예정일 없는 발주가 있는지 → 확인 필요 | 추가 (3-8) |
 | `placeholders` | `{"qty_p100": "1,240", ...}` | 자리 표시자 이름과 값 | 목록 → dict |
 | `directions` | `{"risk_post_p80_vs_p100": "높음", ...}` | 권장량 대비 방향 | 유지 |
@@ -70,6 +71,7 @@ prompt가 정상 · 확인 필요 · 판단 보류를 구분하려면 이름 목
   "recommended": "P100",
   "scenarios": ["P80", "P100", "P120"],
   "methodFallback": true,
+  "startStockEstimated": false,
   "hasNoDateReceipts": false,
   "placeholders": {
     "method": "계산식 B", "method_reason": "작년 동일 구간 유효 관측일 부족으로 A 사용 불가",
@@ -106,8 +108,9 @@ prompt가 정상 · 확인 필요 · 판단 보류를 구분하려면 이름 목
 | `cover_demand` | `forecast_outbound` | 배수 적용 전 |
 | `multiplier` | `multiplier` | |
 | `recent_28d_avg` | 없음 | `ProductResult`에 없음. 필요하면 요청 |
+| `range_low` · `range_high` | `forecast_range_low` · `forecast_range_high` | `riskStatus=LOW_GRADE`일 때만 (3-8) |
 | `risk_before` | `risk_pre` | |
-| `risk_basis` | 없음 | pooled 미사용 (3-8) |
+| `risk_basis` | 없음 | pooled 미사용 (3-8). "과거 오차 기준"은 template에 고정 문구로 씀 |
 | `sample_n` | `risk_sample_size` | |
 | `qty.K` · `remain.K` · `deplete.K` · `unmet.K` | `qty_pK` · `ending_pK` · `depletion_pK` · `unmet_pK` | `ScenarioResult` |
 | `risk_after.K` | `risk_post_pK` | |
@@ -145,19 +148,26 @@ LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시�
 |---|---|---|---|
 | pooled 위험 | 쓰지 않음. 표본이 부족하면 `riskStatus=INSUFFICIENT_SAMPLE`, 위험 값 없음 | 이력이 짧은 상품은 실제 오차가 큰데, 전체 표본은 안정적인 상품이 대부분이라 위험이 낮게 나오기 쉬움. 나중에 `RiskStatus` 값을 추가해 넣을 수 있음 | `risk_basis` 삭제. 실제 데이터로 `INSUFFICIENT_SAMPLE` 비율을 본 뒤 다시 검토 |
 | 도착 예정일 없는 발주 | `CalculateRequest.noDateReceipts: [{productId, quantity}]`로 받아 `ProductResult.noDateReceiptQty`와 InsightInput에 넘김. **계산에는 쓰지 않음** | InsightInput을 엔진 한 곳에서 만듦(3-1). `plannedReceipts`와 필드를 나눠 계산에 섞이지 않게 함 | `hasNoDateReceipts`와 `no_date_receipts` 자리 표시자 사용 가능 |
+| `plannedReceiptsInHorizon` 의미 | 커버 기간 안에 도착하는 기존 발주 **수량 합계** | 권장량 계산에서 빼는 값 | `planned_receipts`에 그대로 씀. 스키마에 주석 추가 |
+| `forecastRangeLow/High` 의미 | 커버 기간 예상 출고량(`forecastOutboundQty`)의 범위. 계산 방식은 DA-13에서 확정 | `LOW_GRADE`일 때 위험 대신 보여 줄 값 | `forecast_range_low` · `forecast_range_high` |
+| `LOW_GRADE`일 때 `preArrivalRisk` | null | `postArrivalRisk`와 같은 오차 분포를 씀 | `risk_pre` 없음 |
 
-## 4. 상태 매핑 (#4 문서 1장 갱신용)
+## 4. 상태 매핑 (#4 문서 1장 기준)
 
-여러 조건이 겹치면 `산출 불가 > 판단 보류 > 확인 필요 > 정상` 순서로 하나만 고르는 규칙은 그대로입니다. 판정은 `insight/`가 InsightInput만 보고 합니다.
+[#4 문서](../ai-insight/prompt-and-fallback.md) 1장을 기준으로 하고, 확인 필요 조건에 도착 예정일 없는 발주를 더합니다. 여러 조건이 겹치면 `산출 불가 > 판단 보류 > 확인 필요 > 정상` 순서로 하나만 고릅니다. 판정은 `insight/`가 InsightInput만 보고 합니다.
 
 | 입력 | 인사이트 상태 | LLM | `mode` |
 |---|---|---|---|
 | `status=OK`, `riskStatus=OK`, 아래 조건 없음 | 정상 | 예 | `LLM` 또는 `TEMPLATE` |
-| `status=OK` + `methodFallback` 또는 `hasNoDateReceipts` | 확인 필요 | 예 | `LLM` 또는 `TEMPLATE` |
-| `status=OK` + `riskStatus`가 `INSUFFICIENT_SAMPLE` · `LOW_GRADE` | 판단 보류 | 예 | `LLM` 또는 `TEMPLATE` |
+| `status=OK` + `riskStatus=LOW_GRADE`, `startStockEstimated`, `hasNoDateReceipts` 중 하나 | 확인 필요 | 예 | `LLM` 또는 `TEMPLATE` |
+| `status=OK` + `riskStatus=INSUFFICIENT_SAMPLE` | 판단 보류 | 예 | `LLM` 또는 `TEMPLATE` |
 | `status=NOT_NEEDED` | 입고 불필요 | 아니오 | `TEMPLATE` |
 | `status=NOT_CALCULABLE` | 산출 불가 | 아니오 | `TEMPLATE` |
 | `status=EXCLUDED` · `REUPLOAD_REQUIRED` | 산출 불가 | 아니오 | `TEMPLATE` (5장 확인 필요) |
+
+- `LOW_GRADE`이면 위험 대신 예상 출고량 범위(`forecast_range_low` ~ `forecast_range_high`)로 설명합니다.
+- 시작 재고 추정 문장은 상태와 별도로, 해당하면 항상 붙입니다.
+- 산식 사유 문장은 `methodFallback = true`일 때만 붙입니다. `methodReason`은 대체하지 않아도 "평가 결과 기본 방식"처럼 값이 있습니다.
 
 ## 5. 아직 열린 것
 
@@ -172,8 +182,8 @@ LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시�
 ## 합의 후 할 일
 
 - [ ] 이 문서 상태를 "결정"으로 바꾸고 날짜 기록, 0001 미정의 자리 표시자 항목 닫기
-- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput` · `noDateReceipts` · `noDateReceiptQty`) 수정 — 장준영
+- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput` · `noDateReceipts` · `noDateReceiptQty`, `plannedReceiptsInHorizon` 주석) 수정 — 장준영
 - [ ] `engine/insight_facts.py`로 `build_catalog` 이식, 이석형 님 리뷰 — 장준영
 - [ ] `insight/`로 기존 코드 이동, 이름 · 상태값 교체, 검사기 정규식 갱신 — 이석형
-- [ ] #4 문서(prompt · template) 자리 표시자 이름과 상태 매핑 갱신 — 이석형
+- [ ] #4 문서(prompt · template) 자리 표시자 이름 갱신, 미반영 물량 문장 복원, 산식 사유 조건을 `methodFallback`으로 변경 — 이석형
 - [ ] 백엔드에 3-1 · 3-5 · 3-7 공유, 명세 반영 요청
