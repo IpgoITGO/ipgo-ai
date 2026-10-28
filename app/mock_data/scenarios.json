@@ -1,0 +1,3 @@
+{"type": "CUSTOM", "qty": 84, "isDuplicate": false, "expectedDepletionOn": null,
+ "expectedEndingStock": 18.2, "unmetDemandQty": 0, "postArrivalRisk": 0.04,
+ "dailyProjection": [{"date": "2026-10-15", "closingQty": 36.6}]}

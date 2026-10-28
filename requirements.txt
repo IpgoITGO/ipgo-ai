@@ -1,0 +1,4 @@
+# 배포용: 서버 실행에 필요한 패키지만
+-r requirements/base.txt
+-r requirements/engine.txt
+-r requirements/insight.txt
