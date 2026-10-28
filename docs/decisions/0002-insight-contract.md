@@ -1,6 +1,6 @@
-# 0002. AI 인사이트 연동 계약 — 합의 초안
+# 0002. AI 인사이트 연동 계약
 
-- 상태: **초안** (이석형 님 확인 전) · Issue #7
+- 상태: **이석형 님 합의 완료** (2026-10-28, #8) · **백엔드 확인 대기** (IpgoITGO/ipgo-server#25) · 스키마 반영 #10
 - 기준: API 명세서 4장 `/engine/insight` · 5장, [0001](0001-engine-contract.md), [prompt 규칙과 기본 문장](../ai-insight/prompt-and-fallback.md) (#4)
 - 관련 요구사항: DA-11, AI-01 ~ AI-03, AI-05, AI-06
 
