@@ -197,7 +197,7 @@ class ProductResult(CamelModel):
     forecast_outbound_qty: float | None = None
     start_stock_qty: float | None = None
     start_stock_estimated: bool = False     # 오늘 > 기준일이면 True
-    planned_receipts_in_horizon: int = 0
+    planned_receipts_in_horizon: int = 0    # 커버 기간 안에 도착하는 기존 발주 수량 합계 (건수 아님)
     pre_arrival_unmet_qty: float = 0
     required_qty_before_rounding: float | None = None
     recommended_qty: int | None = None      # 입고 단위로 올린 정수
