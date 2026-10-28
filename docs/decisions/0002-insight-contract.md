@@ -182,7 +182,7 @@ LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시�
 ## 합의 후 할 일
 
 - [ ] 이 문서 상태를 "결정"으로 바꾸고 날짜 기록, 0001 미정의 자리 표시자 항목 닫기
-- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput` · `noDateReceipts` · `noDateReceiptQty`, `plannedReceiptsInHorizon` 주석) 수정 — 장준영
+- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput` · `noDateReceipts` · `noDateReceiptQty`) 수정 — 장준영
 - [ ] `engine/insight_facts.py`로 `build_catalog` 이식, 이석형 님 리뷰 — 장준영
 - [ ] `insight/`로 기존 코드 이동, 이름 · 상태값 교체, 검사기 정규식 갱신 — 이석형
 - [ ] #4 문서(prompt · template) 자리 표시자 이름 갱신, 미반영 물량 문장 복원, 산식 사유 조건을 `methodFallback`으로 변경 — 이석형
