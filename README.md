@@ -38,9 +38,23 @@ ruff check .                     # 코드 검사
 | 이름 | 설명 | 기본값 |
 |---|---|---|
 | `ENGINE_MODE` | `mock`이면 명세 예시 응답, `real`이면 실제 계산 | `mock` |
-| `DATABASE_URL` | 계산 엔진의 DB 연결 (읽기 전용). 방식 미정 | 없음 |
-| `STORAGE_BASE` | 원본 엑셀 저장 위치. 방식 미정 | 없음 |
+| `DATABASE_URL` | 로컬 개발용 DB 연결. AWS에서는 조회 전용 FastAPI role의 RDS 연결만 사용 | 없음 |
+| `STORAGE_BASE` | 로컬 개발용 원본 엑셀 경로. AWS 목표 환경에서는 S3로 대체 | 없음 |
 | `OPENAI_API_KEY` | AI 인사이트 LLM 호출 | 없음 |
+
+## AWS 목표 계약
+
+- Spring Boot가 업무 DB와 상태 변경을 소유합니다. FastAPI는 승인된 계산용 view와 필요한 table을
+  `SELECT`만 하며 migration과 데이터 변경을 하지 않습니다.
+- 업로드 원본은 private S3 bucket에서 읽습니다. Spring은 읽기·쓰기, FastAPI는 읽기 권한만
+  가집니다.
+- 정제·계산·백테스트는 SQS worker가 처리하고 결과 queue에 발행합니다. Spring이 결과를 검증해
+  DB에 저장합니다.
+- 시나리오와 AI 인사이트만 private network의 내부 HTTP로 호출합니다.
+
+현재 코드는 mock HTTP와 로컬 설정 단계이며 S3·SQS·RDS adapter는 아직 구현하지 않았습니다.
+자세한 경계와 전환 조건은 [구조와 연동](docs/architecture.md)과
+[계산 엔진 연동 계약](docs/decisions/0001-engine-contract.md)을 봅니다.
 
 ## 작업 흐름
 
