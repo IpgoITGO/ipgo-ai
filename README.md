@@ -52,7 +52,9 @@ AWS에서는 `DATABASE_URL`에 조회 전용 PostgreSQL role만 사용합니다.
 
 `dev` 브랜치의 `Deploy AI to AWS dev` workflow는 GitHub OIDC로 image를 ECR에 한 번 push하고
 FastAPI service와 worker task definition을 함께 갱신합니다. GitHub `dev` Environment 승인과
-`AWS_DEPLOY_ROLE_ARN`, `AWS_ACCOUNT_ID` 변수가 필요합니다.
+`AWS_DEPLOY_ROLE_ARN`, `AWS_ACCOUNT_ID` 변수가 필요합니다. 첫 배포의 기본값은 API 1개,
+worker 0개, `ENGINE_MODE=mock`입니다. 실제 계산 엔진과 OpenAI key가 준비된 뒤에만 `real`을
+선택하고, 비동기 job 처리가 필요할 때만 worker를 1개 이상 켭니다.
 
 ## 작업 흐름
 

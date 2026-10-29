@@ -3,6 +3,12 @@ name: Deploy AI to AWS dev
 on:
   workflow_dispatch:
     inputs:
+      engine_mode:
+        description: "FastAPI engine mode (use mock until the real engine is ready)"
+        required: true
+        default: "mock"
+        type: choice
+        options: ["mock", "real"]
       api_desired_count:
         description: "FastAPI service task count after deployment"
         required: true
@@ -12,7 +18,7 @@ on:
       worker_desired_count:
         description: "SQS worker task count after deployment"
         required: true
-        default: "1"
+        default: "0"
         type: choice
         options: ["0", "1", "2"]
 
@@ -65,6 +71,8 @@ jobs:
           task-definition: ${{ runner.temp }}/ai-api-task-definition.json
           container-name: ai-api
           image: ${{ steps.login-ecr.outputs.registry }}/ipgo-dev/ai:${{ github.sha }}
+          environment-variables: |
+            ENGINE_MODE=${{ inputs.engine_mode }}
       - name: Deploy API task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b
         with:
@@ -104,4 +112,3 @@ jobs:
           aws ecs wait services-stable \
             --cluster ipgo-dev-cluster \
             --services ipgo-dev-ai-api ipgo-dev-ai-worker
-
