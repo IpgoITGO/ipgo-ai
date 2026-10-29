@@ -28,3 +28,11 @@ jobs:
         run: ruff check .
       - name: Test
         run: pytest -q
+
+  container:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build runtime image
+        run: docker build --tag ipgo-ai:ci .

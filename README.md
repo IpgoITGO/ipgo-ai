@@ -38,9 +38,21 @@ ruff check .                     # 코드 검사
 | 이름 | 설명 | 기본값 |
 |---|---|---|
 | `ENGINE_MODE` | `mock`이면 명세 예시 응답, `real`이면 실제 계산 | `mock` |
-| `DATABASE_URL` | 계산 엔진의 DB 연결 (읽기 전용). 방식 미정 | 없음 |
-| `STORAGE_BASE` | 원본 엑셀 저장 위치. 방식 미정 | 없음 |
+| `DATABASE_URL` | 승인된 view만 조회하는 PostgreSQL read-only 연결 | 없음 |
+| `STORAGE_BASE` | 로컬 개발용 원본 엑셀 root. AWS에서는 S3 설정을 우선 사용 | 없음 |
+| `AWS_REGION` | S3·SQS를 사용할 AWS Region | `ap-northeast-2` |
+| `IPGO_UPLOAD_BUCKET` | AWS 환경에서 원본을 읽을 private S3 bucket | 없음 |
+| `IPGO_JOBS_QUEUE_URL` | 정제·계산·백테스트 job queue | 없음 |
+| `IPGO_RESULTS_QUEUE_URL` | 처리 결과를 Spring에 전달할 result queue | 없음 |
 | `OPENAI_API_KEY` | AI 인사이트 LLM 호출 | 없음 |
+
+AWS에서는 `DATABASE_URL`에 조회 전용 PostgreSQL role만 사용합니다. worker는 SQS를 long polling하고
+성공 결과를 result queue에 발행한 뒤 job을 삭제합니다. transient 오류는 job을 삭제하지 않아 SQS의
+재시도와 DLQ 정책을 따릅니다.
+
+`dev` 브랜치의 `Deploy AI to AWS dev` workflow는 GitHub OIDC로 image를 ECR에 한 번 push하고
+FastAPI service와 worker task definition을 함께 갱신합니다. GitHub `dev` Environment 승인과
+`AWS_DEPLOY_ROLE_ARN`, `AWS_ACCOUNT_ID` 변수가 필요합니다.
 
 ## 작업 흐름
 
