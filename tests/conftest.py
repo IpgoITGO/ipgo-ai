@@ -10,4 +10,7 @@ def client(monkeypatch):
     monkeypatch.setenv("ENGINE_MODE", "mock")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("STORAGE_BASE", raising=False)
+    monkeypatch.delenv("IPGO_UPLOAD_BUCKET", raising=False)
+    monkeypatch.delenv("IPGO_JOBS_QUEUE_URL", raising=False)
+    monkeypatch.delenv("IPGO_RESULTS_QUEUE_URL", raising=False)
     return TestClient(app, raise_server_exceptions=False)
