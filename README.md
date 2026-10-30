@@ -44,7 +44,7 @@ ruff check .                     # 코드 검사
 | `IPGO_UPLOAD_BUCKET` | AWS 환경에서 원본을 읽을 private S3 bucket | 없음 |
 | `IPGO_JOBS_QUEUE_URL` | 정제·계산·백테스트 job queue | 없음 |
 | `IPGO_RESULTS_QUEUE_URL` | 처리 결과를 Spring에 전달할 result queue | 없음 |
-| `OPENAI_API_KEY` | AI 인사이트 LLM 호출 | 없음 |
+| `OPENAI_API_KEY` | `real` 모드의 AI 인사이트 LLM 호출에만 필요 | 없음 |
 
 ## AWS 데이터 접근 계약
 
@@ -66,8 +66,10 @@ AWS에서는 `DATABASE_URL`에 조회 전용 PostgreSQL role만 사용합니다.
 `dev` 브랜치의 `Deploy AI to AWS dev` workflow는 GitHub OIDC로 image를 ECR에 한 번 push하고
 FastAPI service와 worker task definition을 함께 갱신합니다. GitHub `dev` Environment 승인과
 `AWS_DEPLOY_ROLE_ARN`, `AWS_ACCOUNT_ID` 변수가 필요합니다. 첫 배포의 기본값은 API 1개,
-worker 0개, `ENGINE_MODE=mock`입니다. 실제 계산 엔진과 OpenAI key가 준비된 뒤에만 `real`을
-선택하고, 비동기 job 처리가 필요할 때만 worker를 1개 이상 켭니다.
+worker 0개, `ENGINE_MODE=mock`입니다. `mock` 배포에서는 API task definition에서
+`OPENAI_API_KEY` secret 주입을 제외합니다. `real` 배포에서는 Secrets Manager ARN을 담은
+GitHub 변수 `AWS_AI_OPENAI_SECRET_ARN`이 필요합니다. 실제 계산 엔진과 OpenAI key가 준비된
+뒤에만 `real`을 선택하고, 비동기 job 처리가 필요할 때만 worker를 1개 이상 켭니다.
 
 자세한 경계와 전환 조건은 [구조와 연동](docs/architecture.md)과
 [계산 엔진 연동 계약](docs/decisions/0001-engine-contract.md)을 봅니다.
