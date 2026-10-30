@@ -64,6 +64,49 @@ jobs:
             --task-definition ipgo-dev-ai-worker \
             --query taskDefinition \
             > "$RUNNER_TEMP/ai-worker-task-definition.json"
+      - name: Configure API OpenAI secret
+        env:
+          ENGINE_MODE: ${{ inputs.engine_mode }}
+          OPENAI_SECRET_ARN: ${{ vars.AWS_AI_OPENAI_SECRET_ARN }}
+        run: |
+          if [[ "$ENGINE_MODE" == "real" && -z "$OPENAI_SECRET_ARN" ]]; then
+            echo "AWS_AI_OPENAI_SECRET_ARN is required for real mode." >&2
+            exit 1
+          fi
+
+          jq \
+            --arg mode "$ENGINE_MODE" \
+            --arg openai_secret_arn "$OPENAI_SECRET_ARN" \
+            '(.containerDefinitions[] | select(.name == "ai-api") | .secrets) |= (
+              ((. // []) | map(select(.name != "OPENAI_API_KEY"))) +
+              (if $mode == "real" then
+                [{"name": "OPENAI_API_KEY", "valueFrom": $openai_secret_arn}]
+              else
+                []
+              end)
+            )' \
+            "$RUNNER_TEMP/ai-api-task-definition.json" \
+            > "$RUNNER_TEMP/ai-api-task-definition.next.json"
+          mv \
+            "$RUNNER_TEMP/ai-api-task-definition.next.json" \
+            "$RUNNER_TEMP/ai-api-task-definition.json"
+
+          openai_secret_count="$(
+            jq '[
+              .containerDefinitions[]
+              | select(.name == "ai-api")
+              | .secrets[]?
+              | select(.name == "OPENAI_API_KEY")
+            ] | length' "$RUNNER_TEMP/ai-api-task-definition.json"
+          )"
+          if [[ "$ENGINE_MODE" == "mock" && "$openai_secret_count" != "0" ]]; then
+            echo "OPENAI_API_KEY must not be injected in mock mode." >&2
+            exit 1
+          fi
+          if [[ "$ENGINE_MODE" == "real" && "$openai_secret_count" != "1" ]]; then
+            echo "OPENAI_API_KEY must be injected exactly once in real mode." >&2
+            exit 1
+          fi
       - name: Render API task definition
         id: render-api
         uses: aws-actions/amazon-ecs-render-task-definition@8d79160660ad39c402a16e5fc7cd2a32e8f7d6b7
