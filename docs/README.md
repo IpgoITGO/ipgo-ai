@@ -10,5 +10,6 @@
 | 폴더 구조와 Spring 연동 | [구조와 연동](architecture.md) |
 | 연동 계약 결정 기록 | [decisions](decisions/) |
 | AI 인사이트 prompt·자리 표시자·기본 문장 | [prompt 규칙과 기본 문장](ai-insight/prompt-and-fallback.md) |
+| AI 인사이트 LLM 모델 선정·측정 결과 | [LLM 모델 선정](ai-insight/llm-model-selection.md) |
 
 AI 실행 방법과 주요 구조는 루트 [README](../README.md)에 유지합니다.
