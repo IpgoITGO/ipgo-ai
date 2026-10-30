@@ -8,7 +8,7 @@ from app.jobs import JobStatus, JobType
 from app.mocks import load_mock
 from app.worker import process_message
 from schemas.engine import CalculateResponse, SourceFile
-from tests.payloads import CALC_REQUEST
+from tests.payloads import CALC_REQUEST, CLEAN_REQUEST
 
 
 def test_local_storage_reader_stays_inside_configured_root(tmp_path, monkeypatch):
@@ -128,3 +128,23 @@ def test_database_reader_uses_read_only_connection_and_source_filter(monkeypatch
     assert connection.rolled_back is True
     assert executed[0][1] == (3, [21, 22])
     assert result.to_dict(orient="records") == [{"product_id": 11, "closing_qty": 3.5}]
+
+
+def test_clean_job_passes_source_bytes_and_known_barcodes(monkeypatch):
+    calls = []
+
+    def clean(files, known_barcodes):
+        calls.append((files, known_barcodes))
+        raise NotImplementedError
+
+    monkeypatch.setattr(jobs.storage, "read_source_file", lambda _source: b"xlsx")
+    monkeypatch.setattr(jobs.repository, "load_known_barcodes", lambda _user_id: {"8800000000001"})
+    monkeypatch.setattr(jobs.cleaning, "clean", clean)
+    body = json.dumps({"contractVersion": "1", "jobId": "clean-12", "jobType": "CLEAN", "payload": CLEAN_REQUEST})
+
+    result = process_message(body)
+
+    assert result.error is not None and result.error.code == "NOT_IMPLEMENTED"
+    [(files, known_barcodes)] = calls
+    assert [content for _, content in files] == [b"xlsx"] * len(CLEAN_REQUEST["files"])
+    assert known_barcodes == {"8800000000001"}

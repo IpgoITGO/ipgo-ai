@@ -47,7 +47,7 @@ def execute(job: JobEnvelope) -> ResultEnvelope:
     if job.job_type is JobType.CLEAN:
         request = CleanRequest.model_validate(job.payload)
         sources = [(source, storage.read_source_file(source)) for source in request.files]
-        response = cleaning.clean(sources)
+        response = cleaning.clean(sources, repository.load_known_barcodes(request.user_id))
     elif job.job_type is JobType.CALCULATE:
         request = CalculateRequest.model_validate(job.payload)
         daily = repository.load_product_daily(request.warehouse_id, request.upload_file_ids)

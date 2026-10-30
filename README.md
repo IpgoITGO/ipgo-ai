@@ -44,9 +44,22 @@ ruff check .                     # 코드 검사
 | `IPGO_UPLOAD_BUCKET` | AWS 환경에서 원본을 읽을 private S3 bucket | 없음 |
 | `IPGO_JOBS_QUEUE_URL` | 정제·계산·백테스트 job queue | 없음 |
 | `IPGO_RESULTS_QUEUE_URL` | 처리 결과를 Spring에 전달할 result queue | 없음 |
-| `OPENAI_API_KEY` | AI 인사이트 LLM 호출 | 없음 |
+| `OPENAI_API_KEY` | `real` 모드의 AI 인사이트 LLM 호출에만 필요 | 없음 |
 | `OPENAI_MODEL` | AI 인사이트 LLM 모델 ([모델 선정](docs/ai-insight/llm-model-selection.md)) | `gpt-4o-mini` |
 | `LLM_TIMEOUT_SEC` | LLM 호출 한 번의 시간 제한(초). 넘으면 `LLM_TIMEOUT` | `10` |
+
+## AWS 데이터 접근 계약
+
+- Spring Boot가 업무 DB와 상태 변경을 소유합니다. FastAPI는 승인된 계산용 view와 필요한 table을
+  `SELECT`만 하며 migration과 데이터 변경을 하지 않습니다.
+- 업로드 원본은 private S3 bucket에서 읽습니다. Spring은 읽기·쓰기, FastAPI는 읽기 권한만
+  가집니다.
+- 정제·계산·백테스트는 SQS worker가 처리하고 결과 queue에 발행합니다. Spring이 결과를 검증해
+  DB에 저장합니다.
+- 시나리오와 AI 인사이트만 private network의 내부 HTTP로 호출합니다.
+
+현재 기본 실행 모드는 `mock`입니다. S3 읽기, RDS read-only 조회, SQS worker와 AWS dev 배포 경로는
+구현되어 있으며 실제 계산 엔진과 Spring 연동이 검증된 기능부터 `real` 모드와 worker를 활성화합니다.
 
 AWS에서는 `DATABASE_URL`에 조회 전용 PostgreSQL role만 사용합니다. worker는 SQS를 long polling하고
 성공 결과를 result queue에 발행한 뒤 job을 삭제합니다. transient 오류는 job을 삭제하지 않아 SQS의
@@ -55,8 +68,13 @@ AWS에서는 `DATABASE_URL`에 조회 전용 PostgreSQL role만 사용합니다.
 `dev` 브랜치의 `Deploy AI to AWS dev` workflow는 GitHub OIDC로 image를 ECR에 한 번 push하고
 FastAPI service와 worker task definition을 함께 갱신합니다. GitHub `dev` Environment 승인과
 `AWS_DEPLOY_ROLE_ARN`, `AWS_ACCOUNT_ID` 변수가 필요합니다. 첫 배포의 기본값은 API 1개,
-worker 0개, `ENGINE_MODE=mock`입니다. 실제 계산 엔진과 OpenAI key가 준비된 뒤에만 `real`을
-선택하고, 비동기 job 처리가 필요할 때만 worker를 1개 이상 켭니다.
+worker 0개, `ENGINE_MODE=mock`입니다. `mock` 배포에서는 API task definition에서
+`OPENAI_API_KEY` secret 주입을 제외합니다. `real` 배포에서는 Secrets Manager ARN을 담은
+GitHub 변수 `AWS_AI_OPENAI_SECRET_ARN`이 필요합니다. 실제 계산 엔진과 OpenAI key가 준비된
+뒤에만 `real`을 선택하고, 비동기 job 처리가 필요할 때만 worker를 1개 이상 켭니다.
+
+자세한 경계와 전환 조건은 [구조와 연동](docs/architecture.md)과
+[계산 엔진 연동 계약](docs/decisions/0001-engine-contract.md)을 봅니다.
 
 ## 작업 흐름
 
