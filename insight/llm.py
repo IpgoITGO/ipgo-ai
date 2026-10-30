@@ -1,6 +1,6 @@
 """AI-02 LLM 호출기 (#32). 한 번만 부르고(단일 호출) 호출 오류와 시간 초과를 구분한다.
 
-설정 (환경 변수. .env.example 반영은 PR #20 병합 뒤)
+설정 (환경 변수. 이름과 기본값은 .env.example)
   OPENAI_API_KEY   실제 호출 시 필수
   OPENAI_MODEL     기본 gpt-4o-mini
   LLM_TIMEOUT_SEC  기본 10 (명세 5장 가정값, 7장 미결)
