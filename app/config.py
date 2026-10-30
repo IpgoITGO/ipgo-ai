@@ -9,9 +9,13 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class Settings:
-    engine_mode: str          # "mock": 명세 예시 응답을 돌려줌 · "real": 실제 계산
-    database_url: str | None  # 계산 엔진은 읽기 전용 (DB 방식 미정 → docs/decisions/0001)
-    storage_base: str | None  # 원본 엑셀 위치 (미정 → 설정 전에는 STORAGE_NOT_CONFIGURED)
+    engine_mode: str
+    database_url: str | None
+    storage_base: str | None
+    aws_region: str
+    upload_bucket: str | None
+    jobs_queue_url: str | None
+    results_queue_url: str | None
 
 
 def get_settings() -> Settings:
@@ -20,4 +24,8 @@ def get_settings() -> Settings:
         engine_mode=os.getenv("ENGINE_MODE", "mock"),
         database_url=os.getenv("DATABASE_URL") or None,
         storage_base=os.getenv("STORAGE_BASE") or None,
+        aws_region=os.getenv("AWS_REGION", "ap-northeast-2"),
+        upload_bucket=os.getenv("IPGO_UPLOAD_BUCKET") or None,
+        jobs_queue_url=os.getenv("IPGO_JOBS_QUEUE_URL") or None,
+        results_queue_url=os.getenv("IPGO_RESULTS_QUEUE_URL") or None,
     )

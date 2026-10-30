@@ -1,10 +1,10 @@
-# 0002. AI 인사이트 연동 계약 — 합의 초안
+# 0002. AI 인사이트 연동 계약
 
-- 상태: **초안** (이석형 님 확인 전) · Issue #7
+- 상태: **요구사항 · 명세 대조 반영 중** (#24 · IpgoITGO/ipgo-server#25) · pooled 위험은 요구사항 DA-07 반영 (#11) · 스키마 반영 #10
 - 기준: API 명세서 4장 `/engine/insight` · 5장, [0001](0001-engine-contract.md), [prompt 규칙과 기본 문장](../ai-insight/prompt-and-fallback.md) (#4)
 - 관련 요구사항: DA-11, AI-01 ~ AI-03, AI-05, AI-06
 
-기존 `ai_insight` 코드는 0001 합의 전에 만든 테스트 코드라서 `schemas/`와 다른 곳이 있습니다. 이석형 님이 정리한 비교표를 바탕으로 **이미 정해진 것**, **합의했지만 기록이 없는 것**, **새로 정할 것**을 나눴습니다. 각 항목에 동의 / 수정 의견을 달아 주세요.
+기존 `ai_insight` 코드는 0001 합의 전에 만든 테스트 코드라서 `schemas/`와 다른 곳이 있습니다. 이석형 님이 정리한 비교표를 바탕으로 **이미 정해진 것**, **합의했지만 기록이 없는 것**, **새로 정할 것**을 나눴습니다.
 
 ## 1. 이미 정해진 것 — 기존 코드를 맞춤
 
@@ -110,7 +110,7 @@ prompt가 정상 · 확인 필요 · 판단 보류를 구분하려면 이름 목
 | `recent_28d_avg` | 없음 | `ProductResult`에 없음. 필요하면 요청 |
 | `range_low` · `range_high` | `forecast_range_low` · `forecast_range_high` | `riskStatus=LOW_GRADE`일 때만 (3-8) |
 | `risk_before` | `risk_pre` | |
-| `risk_basis` | 없음 | pooled 미사용 (3-8). "과거 오차 기준"은 template에 고정 문구로 씀 |
+| `risk_basis` | `risk_basis` | `ProductResult.riskBasis`(`SKU` · `POOLED`) → "이 상품의 과거 오차 기준" · "전체 상품의 과거 오차 기준" (3-8) |
 | `sample_n` | `risk_sample_size` | |
 | `qty.K` · `remain.K` · `deplete.K` · `unmet.K` | `qty_pK` · `ending_pK` · `depletion_pK` · `unmet_pK` | `ScenarioResult` |
 | `risk_after.K` | `risk_post_pK` | |
@@ -146,7 +146,7 @@ LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시�
 
 | 항목 | 결정 | 이유 | 인사이트 영향 |
 |---|---|---|---|
-| pooled 위험 | 쓰지 않음. 표본이 부족하면 `riskStatus=INSUFFICIENT_SAMPLE`, 위험 값 없음 | 이력이 짧은 상품은 실제 오차가 큰데, 전체 표본은 안정적인 상품이 대부분이라 위험이 낮게 나오기 쉬움. 나중에 `RiskStatus` 값을 추가해 넣을 수 있음 | `risk_basis` 삭제. 실제 데이터로 `INSUFFICIENT_SAMPLE` 비율을 본 뒤 다시 검토 |
+| pooled 위험 | **요구사항 DA-07 · 기획서 · MVP 정의서대로 씀** (2026-10-28 변경). SKU 표본이 최소 기준 미만이면 전체 SKU 오차 비율을 쓰고, 전체로도 미만이면 `riskStatus=INSUFFICIENT_SAMPLE`. 어느 쪽을 썼는지 `ProductResult.riskBasis`(`SKU` · `POOLED`)로 돌려줌 | 처음에는 "이력이 짧은 상품의 위험이 낮게 나올 수 있다"는 이유로 빼기로 했으나, 요구사항 문서와 어긋남. 그 우려는 DA-10(위험 구간별 실제 품절 비율)에서 검증 | `risk_basis` 유지 |
 | 도착 예정일 없는 발주 | `CalculateRequest.noDateReceipts: [{productId, quantity}]`로 받아 `ProductResult.noDateReceiptQty`와 InsightInput에 넘김. **계산에는 쓰지 않음** | InsightInput을 엔진 한 곳에서 만듦(3-1). `plannedReceipts`와 필드를 나눠 계산에 섞이지 않게 함 | `hasNoDateReceipts`와 `no_date_receipts` 자리 표시자 사용 가능 |
 | `plannedReceiptsInHorizon` 의미 | 커버 기간 안에 도착하는 기존 발주 **수량 합계** | 권장량 계산에서 빼는 값 | `planned_receipts`에 그대로 씀. 스키마에 주석 추가 |
 | `forecastRangeLow/High` 의미 | 커버 기간 예상 출고량(`forecastOutboundQty`)의 범위. 계산 방식은 DA-13에서 확정 | `LOW_GRADE`일 때 위험 대신 보여 줄 값 | `forecast_range_low` · `forecast_range_high` |
@@ -182,7 +182,7 @@ LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시�
 ## 합의 후 할 일
 
 - [ ] 이 문서 상태를 "결정"으로 바꾸고 날짜 기록, 0001 미정의 자리 표시자 항목 닫기
-- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput` · `noDateReceipts` · `noDateReceiptQty`) 수정 — 장준영
+- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput` · `noDateReceipts` · `noDateReceiptQty` · `riskBasis`) 수정 — 장준영
 - [ ] `engine/insight_facts.py`로 `build_catalog` 이식, 이석형 님 리뷰 — 장준영
 - [ ] `insight/`로 기존 코드 이동, 이름 · 상태값 교체, 검사기 정규식 갱신 — 이석형
 - [ ] #4 문서(prompt · template) 자리 표시자 이름 갱신, 미반영 물량 문장 복원, 산식 사유 조건을 `methodFallback`으로 변경 — 이석형

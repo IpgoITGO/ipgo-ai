@@ -25,7 +25,9 @@
 | 17 | 짧은 작업 전달 | 시나리오·AI 인사이트만 private 내부 HTTP | 짧은 응답은 동기 계약이 단순함 |
 
 14~17은 2026-10-29에 `ipgo-server` #26·#27, `ipgo-ai` #15의 공통 AWS 목표 계약으로
-확정했습니다. 현재 mock router, local storage와 schema는 구현 PR 전까지 유지합니다.
+확정했습니다. S3·RDS adapter와 SQS worker runtime은 구현되어 있습니다. 기본 실행은 mock이며,
+실제 계산 엔진과 Spring 연동이 검증될 때까지 mock router, local storage fallback과 현재 schema를
+유지합니다.
 
 ## 미정
 
