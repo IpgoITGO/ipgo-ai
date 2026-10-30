@@ -31,7 +31,7 @@ def clean(req: CleanRequest) -> CleanResponse:
     if _mock_mode():
         return load_mock("clean", CleanResponse)
     files = [(f, storage.read_source_file(f)) for f in req.files]
-    return cleaning.clean(files)
+    return cleaning.clean(files, repository.load_known_barcodes(req.user_id))
 
 
 @router.post("/calculate", response_model=CalculateResponse, response_model_by_alias=True)

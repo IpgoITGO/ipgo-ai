@@ -6,6 +6,14 @@ from app.config import get_settings
 from app.errors import AppError
 
 
+def load_known_barcodes(user_id: int) -> set[str]:
+    """이 회원의 이미 등록된 상품 바코드 (CleanedProduct.is_new 판정용). DB 연결 전에는 빈 집합 → 모두 새 상품."""
+    if get_settings().database_url is None:
+        return set()
+    # TODO(합의): DB 접근 방식은 #18에서 정함. products를 읽을 view · 열 이름을 Spring과 정한 뒤 구현
+    raise NotImplementedError("products reader")
+
+
 def load_product_daily(warehouse_id: int, upload_file_ids: list[int]) -> pd.DataFrame:
     """ai_product_daily_stocks_v1에서 지정된 source만 읽는다."""
     settings = get_settings()
