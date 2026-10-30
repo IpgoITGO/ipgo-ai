@@ -17,6 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from insight.llm import FakeClient, LLMClient, LLMError, OpenAIClient
+from insight.validator import check_draft
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "insight_prompts.json"
 DEFAULT_MODELS = ["gpt-4o-mini", "gpt-4o"]
@@ -36,7 +37,7 @@ class Record:
     model: str
     case: str
     values: bool
-    ok: bool | None       # None = 아직 검사하지 않음
+    ok: bool              # 호출 오류 · 시간 초과도 실패
     reason: str | None
     latency_ms: int
     input_tokens: int
@@ -68,13 +69,13 @@ def draft_text(raw: str) -> str | None:
     return " ".join(s.strip() for s in sentences if s.strip())
 
 
-def check(raw: str, case: Case) -> tuple[bool | None, str | None]:
-    """(통과 여부, 대표 사유 코드)."""
+def check(raw: str, case: Case) -> tuple[bool, str | None]:
+    """(통과 여부, 대표 사유 코드). 위반이 여럿이면 검사기가 먼저 찾은 것 (숫자 → 키 → 어휘 → 형식)."""
     text = draft_text(raw)
     if text is None:
         return False, "format"
-    # #31 병합 뒤 insight.validator.check_draft(text, case.allowed, case.required)로 검사한다 (#32)
-    return None, None
+    result = check_draft(text, case.allowed, case.required)
+    return result.ok, None if result.ok else result.violations[0].code
 
 
 def run(clients: list[LLMClient], system: str, cases: list[Case], runs: int) -> list[Record]:
@@ -103,12 +104,11 @@ def percentile(values: list[int], q: float) -> int | None:
 
 
 def _stats(rs: list[Record]) -> dict:
-    checked = [r for r in rs if r.ok is not None]
     lat = [r.latency_ms for r in rs]
     costs = [r.cost_usd for r in rs]
     return {
         "n_calls": len(rs),
-        "pass_rate": round(sum(r.ok for r in checked) / len(rs), 3) if rs and len(checked) == len(rs) else None,
+        "pass_rate": round(sum(r.ok for r in rs) / len(rs), 3) if rs else None,
         "reasons": dict(Counter(r.reason for r in rs if r.reason).most_common()),
         "latency_ms": {"p50": percentile(lat, 0.5), "p95": percentile(lat, 0.95), "max": max(lat, default=None)},
         "tokens_mean": {"input": round(sum(r.input_tokens for r in rs) / len(rs)) if rs else None,

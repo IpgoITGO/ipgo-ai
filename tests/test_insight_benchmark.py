@@ -8,7 +8,8 @@ from insight.benchmark import Case, check, draft_text, load_cases, main, percent
 from insight.llm import FakeClient, LLMError, LLMTimeout
 
 CASE = Case("t", True, "user", ["qty_p100"], ["qty_p100"])
-OK = json.dumps({"sentences": ["가", "나"]})
+OK = json.dumps({"sentences": ["권장 입고량은 {{qty_p100}}개입니다.", "입고 후 남는 재고를 함께 확인할 수 있습니다."]},
+                ensure_ascii=False)
 
 
 def test_fixture_cases():
@@ -37,8 +38,23 @@ def test_draft_text(raw, expected):
     assert draft_text(raw) == expected
 
 
-def test_check_format_failure():
-    assert check("문장", CASE) == (False, "format")
+def _draft(*sentences):
+    return json.dumps({"sentences": list(sentences)}, ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (OK, (True, None)),
+        ("문장", (False, "format")),                                                    # JSON 아님
+        (_draft("권장 입고량은 정해졌습니다.", "입고 후 재고를 확인할 수 있습니다."), (False, "missing_key")),
+        (_draft("권장 입고량은 {{qty_p100}}개입니다.", "열흘 뒤 재고를 확인할 수 있습니다."), (False, "raw_number")),
+        (_draft("권장 입고량은 {{qty_p100}}개이며 적절합니다.", "재고를 확인할 수 있습니다."), (False, "banned_word")),
+        (_draft("권장 입고량은 {{qty_p100}}개입니다."), (False, "format")),               # 문장 수 1 (허용 2~3)
+    ],
+)
+def test_check(raw, expected):
+    assert check(raw, CASE) == expected
 
 
 @pytest.mark.parametrize(
@@ -63,7 +79,7 @@ def test_run_counts_failures_in_latency():
     assert s["reasons"] == {"LLM_TIMEOUT": 1, "LLM_ERROR": 1, "format": 1}
     assert s["latency_ms"]["max"] == 10000      # 시간 초과도 응답시간에 들어감
     assert s["cost_usd"] is None                # 실패 건은 비용을 모름 → 합계 없음
-    assert s["pass_rate"] is None               # #31 검사기 연결 전
+    assert s["pass_rate"] == 0.25               # 4건 중 통과 1건. 호출 오류 · 시간 초과도 실패로 셈
 
 
 def test_cost_total():
