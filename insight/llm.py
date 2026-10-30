@@ -67,8 +67,9 @@ def _elapsed_ms(t0: float) -> int:
 
 class OpenAIClient:
     def __init__(self, model: str | None = None, timeout_sec: float | None = None, api_key: str | None = None):
-        self.model = model or os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
-        self.timeout_sec = timeout_sec or float(os.getenv("LLM_TIMEOUT_SEC", DEFAULT_TIMEOUT_SEC))
+        # .env에 이름만 있고 값이 비어 있으면 기본값 (app/config.py와 같은 방식)
+        self.model = model or os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
+        self.timeout_sec = timeout_sec or float(os.getenv("LLM_TIMEOUT_SEC") or DEFAULT_TIMEOUT_SEC)
         # SDK 자체 재시도를 끈다 (단일 호출)
         self._client = openai.OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"), timeout=self.timeout_sec,
                                      max_retries=0)

@@ -14,6 +14,8 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from insight.llm import FakeClient, LLMClient, LLMError, OpenAIClient
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "insight_prompts.json"
@@ -181,6 +183,8 @@ def main(argv: list[str] | None = None) -> None:
     if not cases:
         ap.error("고른 조건에 맞는 사례가 없습니다")
     models = [m.strip() for m in args.models.split(",") if m.strip()]
+    if not args.fake:
+        load_dotenv()  # 로컬 .env의 OPENAI_API_KEY (app/config.py와 같은 방식)
     clients = _fake_clients(models, len(cases) * args.runs) if args.fake else [OpenAIClient(model=m) for m in models]
 
     records = run(clients, system, cases, args.runs)

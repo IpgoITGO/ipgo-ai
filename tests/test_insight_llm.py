@@ -82,6 +82,13 @@ def test_single_call_and_default_timeout(monkeypatch):
     assert c.model == "gpt-4o-mini"
 
 
+def test_empty_env_values_use_defaults(monkeypatch):
+    monkeypatch.setenv("LLM_TIMEOUT_SEC", "")  # .env에 "LLM_TIMEOUT_SEC=" 만 있는 경우
+    monkeypatch.setenv("OPENAI_MODEL", "")
+    c = OpenAIClient(api_key="test-key")
+    assert (c.model, c.timeout_sec) == ("gpt-4o-mini", 10.0)
+
+
 def test_fake_client_raises_queued_error():
     c = FakeClient(["ok", LLMTimeout("slow", 10000)], model="gpt-4o-mini")
     assert c.complete("s", "u").text == "ok"
