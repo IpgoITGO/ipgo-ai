@@ -14,13 +14,14 @@ OK = json.dumps({"sentences": ["권장 입고량은 {{qty_p100}}개입니다.", 
 
 def test_fixture_cases():
     system, cases = load_cases()
-    assert {c.id for c in cases} == {"normal_custom", "duplicate", "low_sample", "pooled", "no_restock_custom",
-                                     "low_grade"}
-    assert sum(c.values for c in cases) == sum(not c.values for c in cases) == 6  # 값 포함 · 이름만 6개씩
+    # 입고 불필요(NOT_NEEDED)는 LLM을 부르지 않아 사례에 없음 (#4 문서 1장)
+    assert {c.id for c in cases} == {"normal_custom", "duplicate", "low_sample", "pooled", "low_grade"}
+    assert sum(c.values for c in cases) == sum(not c.values for c in cases) == 5  # 값 포함 · 이름만 5개씩
     key = re.compile(r"\{\{([a-z][a-z0-9_.]*)\}\}")
     for c in cases:
         assert set(key.findall(c.user)) <= set(c.allowed), c.id  # prompt가 안내하는 키는 모두 목록 안에
         assert set(c.required) <= set(c.allowed), c.id
+        assert not [k for k in c.allowed if "." in k], c.id  # 0002 2-2 snake_case. 점 형식과 섞이면 값을 그대로 씀
         assert ("[값:" in c.user) == c.values, c.id
     assert "{{qty_p100}}" in system and "{{qty.s100}}" not in system  # 0002 3-4 이름
 
@@ -93,6 +94,6 @@ def test_main_fake_writes_summary_without_text(tmp_path, capsys):
     main(["--fake", "--runs", "1", "--out", str(out)])
     data = json.loads(out.read_text(encoding="utf-8"))
     assert set(data["by_model"]) == {"gpt-4o-mini", "gpt-4o"}
-    assert len(data["by_case"]) == 2 * 6       # 두 모델 × 값 포함 사례 6개
+    assert len(data["by_case"]) == 2 * 5       # 두 모델 × 값 포함 사례 5개
     assert all("text" not in r for r in data["records"])  # 생성 문장 원문은 저장하지 않음
     assert "| gpt-4o |" in capsys.readouterr().out
