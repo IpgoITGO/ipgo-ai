@@ -1,0 +1,114 @@
+name: Deploy AI to AWS dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_mode:
+        description: "FastAPI engine mode (use mock until the real engine is ready)"
+        required: true
+        default: "mock"
+        type: choice
+        options: ["mock", "real"]
+      api_desired_count:
+        description: "FastAPI service task count after deployment"
+        required: true
+        default: "1"
+        type: choice
+        options: ["0", "1", "2"]
+      worker_desired_count:
+        description: "SQS worker task count after deployment"
+        required: true
+        default: "0"
+        type: choice
+        options: ["0", "1", "2"]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ipgo-ai-dev-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/dev' && vars.AWS_DEPLOY_ROLE_ARN != '' && vars.AWS_ACCOUNT_ID != ''
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          aws-region: ap-northeast-2
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          role-session-name: ipgo-ai-deploy
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd
+        id: login-ecr
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Build and push immutable image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          push: true
+          provenance: true
+          sbom: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/ipgo-dev/ai:${{ github.sha }}
+      - name: Read current task definitions
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ipgo-dev-ai-api \
+            --query taskDefinition \
+            > "$RUNNER_TEMP/ai-api-task-definition.json"
+          aws ecs describe-task-definition \
+            --task-definition ipgo-dev-ai-worker \
+            --query taskDefinition \
+            > "$RUNNER_TEMP/ai-worker-task-definition.json"
+      - name: Render API task definition
+        id: render-api
+        uses: aws-actions/amazon-ecs-render-task-definition@8d79160660ad39c402a16e5fc7cd2a32e8f7d6b7
+        with:
+          task-definition: ${{ runner.temp }}/ai-api-task-definition.json
+          container-name: ai-api
+          image: ${{ steps.login-ecr.outputs.registry }}/ipgo-dev/ai:${{ github.sha }}
+          environment-variables: |
+            ENGINE_MODE=${{ inputs.engine_mode }}
+      - name: Deploy API task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b
+        with:
+          task-definition: ${{ steps.render-api.outputs.task-definition }}
+          service: ipgo-dev-ai-api
+          cluster: ipgo-dev-cluster
+          wait-for-service-stability: true
+      - name: Render worker task definition
+        id: render-worker
+        uses: aws-actions/amazon-ecs-render-task-definition@8d79160660ad39c402a16e5fc7cd2a32e8f7d6b7
+        with:
+          task-definition: ${{ runner.temp }}/ai-worker-task-definition.json
+          container-name: ai-worker
+          image: ${{ steps.login-ecr.outputs.registry }}/ipgo-dev/ai:${{ github.sha }}
+      - name: Deploy worker task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b
+        with:
+          task-definition: ${{ steps.render-worker.outputs.task-definition }}
+          service: ipgo-dev-ai-worker
+          cluster: ipgo-dev-cluster
+          wait-for-service-stability: true
+      - name: Set approved task counts
+        env:
+          API_DESIRED_COUNT: ${{ inputs.api_desired_count }}
+          WORKER_DESIRED_COUNT: ${{ inputs.worker_desired_count }}
+        run: |
+          aws ecs update-service \
+            --cluster ipgo-dev-cluster \
+            --service ipgo-dev-ai-api \
+            --desired-count "$API_DESIRED_COUNT" \
+            >/dev/null
+          aws ecs update-service \
+            --cluster ipgo-dev-cluster \
+            --service ipgo-dev-ai-worker \
+            --desired-count "$WORKER_DESIRED_COUNT" \
+            >/dev/null
+          aws ecs wait services-stable \
+            --cluster ipgo-dev-cluster \
+            --services ipgo-dev-ai-api ipgo-dev-ai-worker
