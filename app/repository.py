@@ -10,7 +10,7 @@ def load_known_barcodes(user_id: int) -> set[str]:
     """이 회원의 이미 등록된 상품 바코드 (CleanedProduct.is_new 판정용). DB 연결 전에는 빈 집합 → 모두 새 상품."""
     if get_settings().database_url is None:
         return set()
-    # TODO(합의): products 읽기는 DB 접속 방식 확정 후 구현 (docs/decisions/0001)
+    # TODO(합의): DB 접근 방식은 #18에서 정함. products를 읽을 view · 열 이름을 Spring과 정한 뒤 구현
     raise NotImplementedError("products reader")
 
 
