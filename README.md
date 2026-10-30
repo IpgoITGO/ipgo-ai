@@ -38,9 +38,39 @@ ruff check .                     # 코드 검사
 | 이름 | 설명 | 기본값 |
 |---|---|---|
 | `ENGINE_MODE` | `mock`이면 명세 예시 응답, `real`이면 실제 계산 | `mock` |
-| `DATABASE_URL` | 계산 엔진의 DB 연결 (읽기 전용). 방식 미정 | 없음 |
-| `STORAGE_BASE` | 원본 엑셀 저장 위치. 방식 미정 | 없음 |
+| `DATABASE_URL` | 승인된 view만 조회하는 PostgreSQL read-only 연결 | 없음 |
+| `STORAGE_BASE` | 로컬 개발용 원본 엑셀 root. AWS에서는 S3 설정을 우선 사용 | 없음 |
+| `AWS_REGION` | S3·SQS를 사용할 AWS Region | `ap-northeast-2` |
+| `IPGO_UPLOAD_BUCKET` | AWS 환경에서 원본을 읽을 private S3 bucket | 없음 |
+| `IPGO_JOBS_QUEUE_URL` | 정제·계산·백테스트 job queue | 없음 |
+| `IPGO_RESULTS_QUEUE_URL` | 처리 결과를 Spring에 전달할 result queue | 없음 |
 | `OPENAI_API_KEY` | AI 인사이트 LLM 호출 | 없음 |
+
+## AWS 데이터 접근 계약
+
+- Spring Boot가 업무 DB와 상태 변경을 소유합니다. FastAPI는 승인된 계산용 view와 필요한 table을
+  `SELECT`만 하며 migration과 데이터 변경을 하지 않습니다.
+- 업로드 원본은 private S3 bucket에서 읽습니다. Spring은 읽기·쓰기, FastAPI는 읽기 권한만
+  가집니다.
+- 정제·계산·백테스트는 SQS worker가 처리하고 결과 queue에 발행합니다. Spring이 결과를 검증해
+  DB에 저장합니다.
+- 시나리오와 AI 인사이트만 private network의 내부 HTTP로 호출합니다.
+
+현재 기본 실행 모드는 `mock`입니다. S3 읽기, RDS read-only 조회, SQS worker와 AWS dev 배포 경로는
+구현되어 있으며 실제 계산 엔진과 Spring 연동이 검증된 기능부터 `real` 모드와 worker를 활성화합니다.
+
+AWS에서는 `DATABASE_URL`에 조회 전용 PostgreSQL role만 사용합니다. worker는 SQS를 long polling하고
+성공 결과를 result queue에 발행한 뒤 job을 삭제합니다. transient 오류는 job을 삭제하지 않아 SQS의
+재시도와 DLQ 정책을 따릅니다.
+
+`dev` 브랜치의 `Deploy AI to AWS dev` workflow는 GitHub OIDC로 image를 ECR에 한 번 push하고
+FastAPI service와 worker task definition을 함께 갱신합니다. GitHub `dev` Environment 승인과
+`AWS_DEPLOY_ROLE_ARN`, `AWS_ACCOUNT_ID` 변수가 필요합니다. 첫 배포의 기본값은 API 1개,
+worker 0개, `ENGINE_MODE=mock`입니다. 실제 계산 엔진과 OpenAI key가 준비된 뒤에만 `real`을
+선택하고, 비동기 job 처리가 필요할 때만 worker를 1개 이상 켭니다.
+
+자세한 경계와 전환 조건은 [구조와 연동](docs/architecture.md)과
+[계산 엔진 연동 계약](docs/decisions/0001-engine-contract.md)을 봅니다.
 
 ## 작업 흐름
 
