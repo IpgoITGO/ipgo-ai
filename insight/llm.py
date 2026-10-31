@@ -16,7 +16,8 @@ from schemas.insight import FailReason
 
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TIMEOUT_SEC = 10.0
-# USD / 1M tokens (입력, 출력). 10/21 기록의 비용과 맞는 값. 측정 날 OpenAI 가격표로 다시 확인한다.
+# USD / 1M tokens (입력, 출력). 10/21 기록의 비용과 맞는 값.
+# 10/31 OpenAI 가격표(Standard 요금)와 대조해 일치함: https://developers.openai.com/api/docs/pricing
 PRICES_PER_1M: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o": (2.50, 10.00),

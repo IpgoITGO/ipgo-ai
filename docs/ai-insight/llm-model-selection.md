@@ -26,7 +26,7 @@
 | 횟수 | 모델마다 사례당 3회, 모델별 15회 |
 | 호출 | 단일 호출, SDK 재시도 없음, temperature 0.2, max_tokens 400, 시간 제한 10초 |
 | 통과 | 응답이 `{"sentences": [...]}`이고 `check_draft`가 위반 0건 |
-| 비용 | `insight/llm.py` 단가표(USD / 1M tokens): `gpt-4o-mini` 입력 0.15 · 출력 0.60, `gpt-4o` 2.50 · 10.00. 측정 날 OpenAI 가격표와는 아직 대조하지 않음 |
+| 비용 | `insight/llm.py` 단가표(USD / 1M tokens): `gpt-4o-mini` 입력 0.15 · 출력 0.60, `gpt-4o` 2.50 · 10.00. 10/31 [OpenAI 가격표](https://developers.openai.com/api/docs/pricing)(Standard 요금)와 대조해 일치함 |
 
 ### 모델별 합계
 
