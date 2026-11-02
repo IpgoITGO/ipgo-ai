@@ -59,6 +59,53 @@ def test_check(raw, expected):
 
 
 @pytest.mark.parametrize(
+    "sentences",
+    [
+        ["권장 입고량은 {{qty_p100}}개입니다. 재고를 확인할 수 있습니다."],
+        ["권장 입고량은 {{qty_p100}}개입니다. 재고를 확인할 수 있습니다.", "입고일을 확인해 주세요."],
+        ["권장 입고량은 {{qty_p100}}개입니다.", "", "재고를 확인할 수 있습니다."],
+        ["권장 입고량은 {{qty_p100}}개입니다.", "   ", "재고를 확인할 수 있습니다."],
+        ["권장 입고량은", "{{qty_p100}}개입니다.", "재고를", "확인할 수 있습니다."],
+        ["권장 입고량은", "{{qty_p100}}개입니다.", "재고를 확인할 수 있습니다."],
+        ["권장 입고량은 {{qty_p100}}개입니다.", "재고를 확인할 수 있습니다.", "입고일을 확인해 주세요.",
+         "결과를 확인해 주세요."],
+        ["권장 입고량은 {{qty_p100}}개입니다.재고를 확인할 수 있습니다.", "입고일을 확인해 주세요."],
+        ["\n권장 입고량은 {{qty_p100}}개입니다.", "재고를 확인할 수 있습니다."],
+        ["권장 입고량은 {{qty_p100}}개입니다.", "재고를 확인할 수 있습니다.\n"],
+        ["권장 입고량은 {{qty_p100}}개입니다.\r", "재고를 확인할 수 있습니다."],
+    ],
+    ids=["one-item-two-sentences", "two-sentences-in-item", "empty-item", "blank-item", "four-fragments",
+         "three-fragments", "four-sentences", "joined-sentences", "leading-newline", "trailing-newline",
+         "carriage-return"],
+)
+def test_check_rejects_invalid_sentence_items(sentences):
+    raw = _draft(*sentences)
+    assert draft_text(raw) is None
+    assert check(raw, CASE) == (False, "format")
+
+
+@pytest.mark.parametrize("count", [2, 3])
+def test_check_accepts_separate_complete_sentences(count):
+    sentences = [" 권장 입고량은 {{qty_p100}}개입니다. ", " 재고를 확인할 수 있습니다. ", " 입고일을 확인해 주세요. "]
+    assert check(_draft(*sentences[:count]), CASE) == (True, None)
+
+
+def test_sentence_shape_keeps_dots_inside_placeholders():
+    case = Case("legacy", True, "user", ["qty.s100"], ["qty.s100"])
+    raw = _draft("권장 입고량은 {{qty.s100}}개입니다.", "재고를 확인할 수 있습니다.")
+    assert check(raw, case) == (True, None)
+
+
+def test_invalid_sentence_shape_lowers_benchmark_pass_rate():
+    invalid = _draft("권장 입고량은 {{qty_p100}}개입니다. 재고를 확인할 수 있습니다.")
+    client = FakeClient([OK, invalid], model="gpt-4o-mini")
+    stats = summarize(run([client], "sys", [CASE], runs=2))["by_model"]["gpt-4o-mini"]
+    assert stats["n_calls"] == 2
+    assert stats["pass_rate"] == 0.5
+    assert stats["reasons"] == {"format": 1}
+
+
+@pytest.mark.parametrize(
     ("values", "q", "expected"),
     [
         ([4, 1, 3, 2], 0.5, 3),            # 정렬 1,2,3,4 → round(0.5 × 3) = 2번째 → 3

@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from insight.validator import MAX_SENTENCES, MIN_SENTENCES, PLACEHOLDER_RE
 from schemas.base import RiskStatus
 from schemas.insight import InsightInput
 
@@ -193,12 +194,23 @@ def build_prompt(inp: InsightInput) -> Prompt:
 
 
 def draft_text(raw: str) -> str | None:
-    """응답 형식 {"sentences": [...]}을 문장 하나로 잇는다. 형식이 아니면 None."""
+    """응답 {"sentences": [...]}의 2~3개 항목에 완결된 문장이 하나씩 있는지 확인한 뒤 잇는다. 형식이 아니면 None.
+
+    벤치마크(#32)와 엔드포인트(#43)가 같은 규칙을 쓴다 (docs/ai-insight/llm-model-selection.md "응답 형식 검사").
+    """
     try:
         obj = json.loads(raw)
     except json.JSONDecodeError:
         return None
     sentences = obj.get("sentences") if isinstance(obj, dict) else None
-    if not isinstance(sentences, list) or not all(isinstance(s, str) for s in sentences):
+    if (not isinstance(sentences, list) or not MIN_SENTENCES <= len(sentences) <= MAX_SENTENCES
+            or not all(isinstance(s, str) for s in sentences)):
         return None
-    return " ".join(s.strip() for s in sentences if s.strip())
+    for sentence in sentences:
+        # 합치거나 공백을 정리하기 전에 빈 항목·줄바꿈·문장 조각·여러 문장을 거른다.
+        if sentence.splitlines() != [sentence]:
+            return None
+        body = PLACEHOLDER_RE.sub("값", sentence.strip())
+        if re.fullmatch(r"[^.!?]+[.!?]", body) is None:
+            return None
+    return " ".join(s.strip() for s in sentences)
