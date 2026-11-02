@@ -52,7 +52,7 @@ jobs:
           trap 'docker rm -f ipgo-ai-capacity >/dev/null 2>&1 || true' EXIT
           docker create --name ipgo-ai-capacity --network none --memory 256m --memory-swap 256m --cpus 2 \
             --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m \
-            -e ENGINE_MODE=real -e IPGO_EMBEDDED_WORKER_ENABLED=false \
+            -e PYTHONPATH=/app -e ENGINE_MODE=real -e IPGO_EMBEDDED_WORKER_ENABLED=false \
             -v "$PWD/scripts/verify-onebox-capacity.py:/validation/probe.py:ro" \
             -v "$PWD/tests:/app/tests:ro" ipgo-ai:arm-capacity python /validation/probe.py >/dev/null
           docker start --attach ipgo-ai-capacity | tee "$RUNNER_TEMP/capacity.json"
