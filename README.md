@@ -3,7 +3,8 @@
 입고ITGO의 FastAPI 서버입니다. 수불부 정제 · 입고 계산 엔진과 AI 인사이트를 담당합니다.
 Spring Boot 백엔드가 이 서버를 호출하고, 계산 결과 저장은 백엔드가 합니다.
 
-> 현재는 뼈대 단계입니다. 모든 엔드포인트가 API 명세서 예시를 돌려주는 mock 모드로 동작합니다.
+> 기본 실행은 API 명세서 예시를 돌려주는 mock 모드입니다. real 모드의 입고 수량 계산과 직접 입력
+> 시나리오는 기존 계산 함수를 사용합니다. 정제 응답 조립·위험·정확도·인사이트 등은 아직 미완료입니다.
 
 ## 실행
 
@@ -47,6 +48,49 @@ ruff check .                     # 코드 검사
 | `OPENAI_API_KEY` | `real` 모드의 AI 인사이트 LLM 호출에만 필요 | 없음 |
 | `OPENAI_MODEL` | AI 인사이트 LLM 모델 ([모델 선정](docs/ai-insight/llm-model-selection.md)) | `gpt-4o-mini` |
 | `LLM_TIMEOUT_SEC` | LLM 호출 한 번의 시간 제한(초). 넘으면 `LLM_TIMEOUT` | `10` |
+
+## 계산 함수 연결 (DA-11, #46)
+
+`ENGINE_MODE=real`의 `POST /engine/calculate`와 SQS `CALCULATE` job은 상품별로 다음을 실행합니다.
+
+1. 요청한 `uploadFileIds`와 기준일 이하의 상품 기록을 선택합니다. 요청 `productIds`가 없으면
+   조회된 상품과 `settings`의 상품을 모두 대상으로 합니다. 설정·기준일 재고가 없거나 같은 날짜의
+   상품 기록이 중복되면 해당 상품을 `NOT_CALCULABLE`과 사유로 반환합니다.
+2. 요청 정책의 A/B 예측을 사용하고, 해당 방식이 사용 불가이면 다른 방식으로 대체합니다.
+   두 방식 모두 불가이면 권장 수량을 0으로 바꾸지 않고 `NOT_CALCULABLE`로 반환합니다.
+3. 예측 분리 → 기존 발주 분리 → 시작 재고 추정 → 신규 입고 0 시뮬레이션으로 도착 전 미충족
+   산출 → 필요량 계산 → 입고 단위 올림 순서로 실행합니다.
+4. **올림 후 권장 수량**의 80/100/120%를 각각 입고 단위로 올려 시뮬레이션합니다.
+   P100은 유지하고 수량이 P100과 같은 P80/P120에 `isDuplicate=true`를 표시합니다.
+   권장량이 0이면 `NOT_NEEDED`와 빈 시나리오 목록을 반환합니다.
+
+`POST /engine/scenarios`는 같은 상품 1개의 `calculationInput`으로 예측·시작 재고를 재계산하고,
+사용자가 보낸 `qty`를 그대로 적용합니다. 날짜별 결과는 `today+1`부터 `today+H`까지입니다.
+잘못된 날짜(`today < asOfDate`), 중복 설정·상품 ID, 여러 상품의 직접 입력 snapshot은 HTTP
+422 `INVALID_INPUT`입니다. worker에서 발생한 `CalculationInputError`는 `FAILED/INVALID_INPUT`으로
+반환합니다. 일반 DB·네트워크 오류의 기존 재시도 방식은 유지합니다.
+
+이 단계의 `engineVersion`은 `0.2.0`입니다. DA-05 소진 예상일, DA-07 품절 위험, DA-13 정확도와
+백테스트는 아직 계산하지 않습니다. `expectedShortageOn`, `riskStatus`, 위험도·표본 수·정확도 등급·
+평가 수치는 `null`이며 **품절 없음, 위험 0%, 평가 통과를 뜻하지 않습니다.** `validObservationDays`는
+선택한 상품 기록 중 기준일까지의 유효 관측일 수입니다. 시나리오의 기간 내 소진일·미충족 수요는
+기존 DA-06 `simulate()`의 실제 계산 결과입니다.
+
+현재 요청과 DB view에는 검산 제외 사유가 없어 `EXCLUDED` 판정은 이 연결에서 새로 만들지 않습니다.
+정제·제외 상품 전달 계약, 월 경계 검산, `clean()` 조립, 실제 DB/SQS·Spring 저장 연동은 별도입니다.
+worker는 HTTP의 mock 분기를 사용하지 않으므로 `ENGINE_MODE=mock`이어도 실제 계산 함수를 호출합니다.
+
+검증:
+
+```bash
+pytest -q tests/test_calculate.py   # 기존 DA-03/04/06 손계산 표 + 실제 계산 HTTP/dispatch 경로
+pytest -q
+ruff check .
+```
+
+연결 테스트는 DB 조회만 대체하고 계산 함수는 실제로 실행합니다. AWS queue·실제 PostgreSQL·31개
+상품의 전체 사용자 흐름을 검증한 것은 아닙니다. 기본 mock 응답과 `clean`·`backtest`·`insight`의
+미구현 경로는 그대로 유지합니다.
 
 ## AWS 데이터 접근 계약
 

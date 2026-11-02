@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from engine.calculate import CalculationInputError
 from schemas.base import ErrorResponse
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,10 @@ def _json(
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(CalculationInputError)
+    async def _calculation_input(_: Request, exc: CalculationInputError):
+        return _json(422, "INVALID_INPUT", str(exc))
+
     @app.exception_handler(AppError)
     async def _app_error(_: Request, exc: AppError):
         return _json(exc.status, exc.code, exc.message, exc.details)
