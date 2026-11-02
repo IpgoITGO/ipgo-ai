@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -93,7 +94,7 @@ def test_readonly_owner_latest_revision_contract(monkeypatch):
     source = SimpleNamespace(upload_file_id=7, storage_key="fake", original_name="2026년 5월.xlsx")
     current = (7, 3, 4, "fake", source.original_name, date(2026, 5, 1), date(2026, 5, 31), 2, "PROCESSING")
     prior = (6, 3, 4, "old", "old.xlsx", date(2026, 4, 1), date(2026, 4, 30), 3, "DONE")
-    cursor = Cursor(current, prior, [("A", date(2026, 4, 1), date(2026, 4, 30), 10),
+    cursor = Cursor(current, prior, [("A", date(2026, 4, 1), date(2026, 4, 30), Decimal("10.000")),
                                      ("A", date(2026, 4, 1), date(2026, 4, 29), 11)])
     connection = Connection(cursor)
     monkeypatch.setattr(repository, "get_settings", lambda: SimpleNamespace(database_url="fake"))

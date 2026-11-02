@@ -10,6 +10,7 @@ def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,
                           previous_upload_file_id: int | None, source):
     """정제 원본과 직전 월 최신 revision을 읽고 요청 소유권을 검증한다."""
     from datetime import date, timedelta
+    from decimal import Decimal
 
     from engine.clean import MAX_QTY, CleaningInputError
 
@@ -67,6 +68,10 @@ def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,
                                 continue
                             if stock_date != prior_end or not key or not isinstance(received, date):
                                 raise CleaningInputError("직전 월 재고 날짜가 월말과 일치하지 않아요")
+                            if isinstance(qty, Decimal):
+                                if not qty.is_finite() or qty != qty.to_integral_value():
+                                    raise CleaningInputError("직전 월 재고 수량이 올바르지 않아요")
+                                qty = int(qty)
                             if isinstance(qty, bool) or not isinstance(qty, int) or not 0 <= qty <= MAX_QTY:
                                 raise CleaningInputError("직전 월 재고 수량이 올바르지 않아요")
                             previous[key, received] = qty
@@ -104,6 +109,7 @@ def load_product_daily(warehouse_id: int, upload_file_ids: list[int], *, user_id
         WHERE warehouse_id = %s
           AND upload_file_id = ANY(%s)
         ORDER BY product_id, stock_date, upload_file_id
+        LIMIT 50001
     """
     try:
         with psycopg.connect(settings.database_url, autocommit=False, connect_timeout=5) as connection:
@@ -123,6 +129,9 @@ def load_product_daily(warehouse_id: int, upload_file_ids: list[int], *, user_id
                         raise CalculationInputError("원본의 소유권, 창고 또는 완료 상태가 올바르지 않아요")
                     cursor.execute(query, (warehouse_id, upload_file_ids))
                     rows = cursor.fetchall()
+                    if len(rows) > 50000:
+                        from engine.calculate import CalculationInputError
+                        raise CalculationInputError("현재 계산 서버의 원본 행 수 지원 범위를 초과했어요")
                     columns = [column.name for column in cursor.description or []]
             finally:
                 connection.rollback()
