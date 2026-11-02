@@ -17,6 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from insight.llm import FakeClient, LLMClient, LLMError, OpenAIClient
+from insight.prompt import draft_text
 from insight.validator import check_draft
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "insight_prompts.json"
@@ -55,18 +56,6 @@ def load_cases(path: Path = FIXTURE) -> tuple[str, list[Case]]:
     #   - 값 넣기 · 방향 문구 위치: #24 ①
     data = json.loads(path.read_text(encoding="utf-8"))
     return data["system"], [Case(c["id"], c["values"], c["user"], c["allowed"], c["required"]) for c in data["cases"]]
-
-
-def draft_text(raw: str) -> str | None:
-    """고정본의 응답 형식 {"sentences": [...]}을 문장 하나로 잇는다. 형식이 아니면 None."""
-    try:
-        obj = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    sentences = obj.get("sentences") if isinstance(obj, dict) else None
-    if not isinstance(sentences, list) or not all(isinstance(s, str) for s in sentences):
-        return None
-    return " ".join(s.strip() for s in sentences if s.strip())
 
 
 def check(raw: str, case: Case) -> tuple[bool, str | None]:
