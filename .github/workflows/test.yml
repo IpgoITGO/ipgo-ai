@@ -36,3 +36,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Build runtime image
         run: docker build --tag ipgo-ai:ci .
+
+
+  arm-capacity:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build native ARM runtime image
+        run: docker build --tag ipgo-ai:arm-capacity .
+      - name: Check real synthetic engine within 256 MiB
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker rm -f ipgo-ai-capacity >/dev/null 2>&1 || true' EXIT
+          docker create --name ipgo-ai-capacity --network none --memory 256m --memory-swap 256m --cpus 2 \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            -e PYTHONPATH=/app -e ENGINE_MODE=real -e IPGO_EMBEDDED_WORKER_ENABLED=false \
+            -v "$PWD/scripts/verify-onebox-capacity.py:/validation/probe.py:ro" \
+            -v "$PWD/tests:/app/tests:ro" ipgo-ai:arm-capacity python /validation/probe.py >/dev/null
+          docker start --attach ipgo-ai-capacity | tee "$RUNNER_TEMP/capacity.json"
+          docker inspect ipgo-ai-capacity --format '{{json .State}}' \
+            | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s["ExitCode"] == 0 and not s["OOMKilled"]; print("Native ARM sample passed; no OOM")'

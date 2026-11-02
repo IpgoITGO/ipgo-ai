@@ -106,14 +106,17 @@ def _product(
     need = required_qty(cover, request.policy.multiplier, stock, planned_qty, baseline.pre_arrival_unmet)
     qty = round_to_order_unit(need, settings.order_unit_qty)
 
-    # shortcut: DA-05/07/13 미구현. 소진 예상일·위험·등급은 각 알고리즘 검증 후 채우며 0으로 대체하지 않는다.
+    # Reuse the tested no-new-order simulation (existing receipts still apply).
+    # This is the first zero closing stock within this calculation's coverage window.
+    shortage = request.today + timedelta(days=baseline.depletion_day) if qty and baseline.depletion_day else None
+    # DA-07/13 위험·등급은 검증 후 채우며 0으로 대체하지 않는다.
     return ProductResult(
         product_id=product_id, status=ResultStatus.OK if qty else ResultStatus.NOT_NEEDED,
         method=method, method_reason=method_reason, multiplier=request.policy.multiplier,
         horizon_days=horizon, forecast_outbound_qty=cover, start_stock_qty=stock, start_stock_estimated=gap > 0,
         planned_receipts_in_horizon=planned_qty, pre_arrival_unmet_qty=baseline.pre_arrival_unmet,
         required_qty_before_rounding=need, recommended_qty=qty, recommended_amount=qty * settings.unit_cost,
-        valid_observation_days=valid_days,
+        valid_observation_days=valid_days, expected_shortage_on=shortage,
     ), planned
 
 

@@ -63,7 +63,7 @@ def test_real_mode_calculate_without_db_is_explicit_error(client, monkeypatch):
 def test_unexpected_error_hides_internals(client, monkeypatch):
     import app.routers.engine as router
 
-    def boom(*_):
+    def boom(*_, **_kw):
         raise RuntimeError("secret internal detail")
 
     monkeypatch.setenv("ENGINE_MODE", "real")

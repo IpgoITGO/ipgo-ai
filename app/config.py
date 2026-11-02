@@ -10,6 +10,7 @@ load_dotenv()
 @dataclass(frozen=True)
 class Settings:
     engine_mode: str
+    embedded_worker_enabled: bool
     database_url: str | None
     storage_base: str | None
     aws_region: str
@@ -22,6 +23,7 @@ def get_settings() -> Settings:
     """요청마다 읽는다 (테스트에서 환경 변수를 바꿔 끼울 수 있게)."""
     return Settings(
         engine_mode=os.getenv("ENGINE_MODE", "mock"),
+        embedded_worker_enabled=os.getenv("IPGO_EMBEDDED_WORKER_ENABLED", "false").lower() == "true",
         database_url=os.getenv("DATABASE_URL") or None,
         storage_base=os.getenv("STORAGE_BASE") or None,
         aws_region=os.getenv("AWS_REGION", "ap-northeast-2"),

@@ -2,10 +2,12 @@
 from pathlib import Path
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import get_settings
 from app.errors import AppError
+from engine.clean import CleaningInputError
 from schemas.engine import SourceFile
 
 MAX_SOURCE_BYTES = 10 * 1024 * 1024
@@ -13,18 +15,28 @@ MAX_SOURCE_BYTES = 10 * 1024 * 1024
 
 def read_source_file(file: SourceFile) -> bytes:
     settings = get_settings()
-    object_key = f"{file.storage_key.rstrip('/')}/original.xlsx"
+    key = file.storage_key
+    if not key or key.startswith("/") or any(part in ("", ".", "..") for part in key.split("/")):
+        raise CleaningInputError("원본 파일 경로가 올바르지 않아요")
+    object_key = f"{key}/original.xlsx"
     if settings.upload_bucket is not None:
         try:
-            response = boto3.client("s3", region_name=settings.aws_region).get_object(
+            response = boto3.client("s3", region_name=settings.aws_region,
+                                   config=Config(connect_timeout=3, read_timeout=10,
+                                                 retries={"total_max_attempts": 2})).get_object(
                 Bucket=settings.upload_bucket,
                 Key=object_key,
             )
             if response.get("ContentLength", 0) > MAX_SOURCE_BYTES:
-                raise AppError(413, "SOURCE_FILE_TOO_LARGE", "원본 파일 크기 제한을 초과했어요")
-            content = response["Body"].read(MAX_SOURCE_BYTES + 1)
+                raise CleaningInputError("원본 파일 크기 제한을 초과했어요")
+            body = response["Body"]
+            try:
+                content = body.read(MAX_SOURCE_BYTES + 1)
+            finally:
+                if hasattr(body, "close"):
+                    body.close()
             if len(content) > MAX_SOURCE_BYTES:
-                raise AppError(413, "SOURCE_FILE_TOO_LARGE", "원본 파일 크기 제한을 초과했어요")
+                raise CleaningInputError("원본 파일 크기 제한을 초과했어요")
             return content
         except (BotoCoreError, ClientError) as exception:
             raise AppError(
@@ -38,11 +50,15 @@ def read_source_file(file: SourceFile) -> bytes:
         root = Path(settings.storage_base).resolve()
         target = (root / object_key).resolve()
         if root not in target.parents:
-            raise AppError(400, "INVALID_STORAGE_KEY", "원본 파일 경로가 올바르지 않아요")
+            raise CleaningInputError("원본 파일 경로가 올바르지 않아요")
         try:
             if target.stat().st_size > MAX_SOURCE_BYTES:
-                raise AppError(413, "SOURCE_FILE_TOO_LARGE", "원본 파일 크기 제한을 초과했어요")
-            return target.read_bytes()
+                raise CleaningInputError("원본 파일 크기 제한을 초과했어요")
+            with target.open("rb") as source:
+                content = source.read(MAX_SOURCE_BYTES + 1)
+            if len(content) > MAX_SOURCE_BYTES:
+                raise CleaningInputError("원본 파일 크기 제한을 초과했어요")
+            return content
         except OSError as exception:
             raise AppError(
                 503,

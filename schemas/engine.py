@@ -38,7 +38,8 @@ class CleanRequest(CamelModel):
     upload_id: int                          # 묶음 번호 = upload_files.job_id
     user_id: int
     warehouse_id: int
-    files: list[SourceFile] = Field(min_length=1)
+    files: list[SourceFile] = Field(min_length=1, max_length=1)
+    previous_upload_file_id: int | None = None
 
 
 class CleanedProduct(CamelModel):

@@ -8,12 +8,14 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.errors import register_error_handlers
+from app.lifespan import lifespan, register_worker_health
 from app.routers import engine as engine_router
 from app.routers import insight as insight_router
 from engine import ENGINE_VERSION
 
-app = FastAPI(title="ipgo-ai", version=ENGINE_VERSION)
+app = FastAPI(title="ipgo-ai", version=ENGINE_VERSION, lifespan=lifespan)
 register_error_handlers(app)
+register_worker_health(app)
 
 app.include_router(engine_router.router, prefix="/engine", tags=["engine"])
 app.include_router(insight_router.router, prefix="/engine", tags=["insight"])
