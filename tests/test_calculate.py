@@ -263,7 +263,7 @@ def test_real_http_and_worker_execute_engine_not_mock(client, monkeypatch):
     monkeypatch.setenv("ENGINE_MODE", "real")
     for case in ("1", "4"):
         request, daily, expected, _ = replenish_case(case)
-        monkeypatch.setattr(repository, "load_product_daily", lambda *_, data=daily: data)
+        monkeypatch.setattr(repository, "load_product_daily", lambda *_, data=daily, **_kw: data)
         response = client.post("/engine/calculate", json=request.to_json_dict())
         assert response.status_code == 200
         body = response.json()
@@ -278,7 +278,7 @@ def test_real_http_and_worker_execute_engine_not_mock(client, monkeypatch):
 def test_real_custom_http_and_invalid_snapshot(client, monkeypatch):
     monkeypatch.setenv("ENGINE_MODE", "real")
     request, daily, _, _ = replenish_case("1")
-    monkeypatch.setattr(repository, "load_product_daily", lambda *_: daily)
+    monkeypatch.setattr(repository, "load_product_daily", lambda *_, **_kw: daily)
     payload = ScenarioRequest(resultId=1, calculationInput=request, qty=20).to_json_dict()
     response = client.post("/engine/scenarios", json=payload)
     assert response.status_code == 200 and response.json()["type"] == "CUSTOM"
@@ -291,7 +291,7 @@ def test_real_custom_http_and_invalid_snapshot(client, monkeypatch):
 def test_invalid_calculation_date_is_http_422_and_terminal_worker_failure(client, monkeypatch):
     monkeypatch.setenv("ENGINE_MODE", "real")
     request, daily, _, _ = replenish_case("1")
-    monkeypatch.setattr(repository, "load_product_daily", lambda *_: daily)
+    monkeypatch.setattr(repository, "load_product_daily", lambda *_, **_kw: daily)
     request.today = request.as_of_date - timedelta(days=1)
     response = client.post("/engine/calculate", json=request.to_json_dict())
     assert response.status_code == 422 and response.json()["code"] == "INVALID_INPUT"

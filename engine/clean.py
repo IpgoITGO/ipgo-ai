@@ -2,6 +2,7 @@
 import re
 from datetime import date, datetime, timedelta
 from io import BytesIO
+from zipfile import BadZipFile, ZipFile
 
 import openpyxl
 import pandas as pd
@@ -20,7 +21,8 @@ ID_HEADERS = {
     "SKU명": "sku_name",
 }
 DATA_START_ROW = 5  # 1행 열 이름 · 2행 'DD 일' · 3행 입고 · 출고 · 조정 · 재고 · 4행 빈 줄
-YEAR_MONTH = re.compile(r"(?<!\d)(20\d{2})(?:-?(0[1-9]|1[0-2])|년\s*(0?[1-9]|1[0-2])월)(?!\d)")
+YEAR_MONTH = re.compile(r"(?<!\d)(20\d{2})[-_. ]?(0[1-9]|1[0-2])(?!\d)")
+KOREAN_MONTH = re.compile(r"(?<!\d)(20\d{2})\s*년\s*(0?[1-9]|1[0-2])\s*월")
 DAY_LABEL = re.compile(r"^\s*(\d{1,2})\s*일\s*$")
 
 
@@ -28,7 +30,12 @@ class CleaningInputError(CalculationInputError):
     """원본 또는 정제 입력이 유효하지 않다."""
 
 
-MAX_QTY = 2**53 - 1
+MAX_QTY = 999_999_999_999_999
+MAX_UNCOMPRESSED = 64 * 1024 * 1024
+MAX_SOURCE_ROWS = 100_000
+MAX_UNIT_DAYS = 50_000
+MAX_PRODUCT_DAYS = 10_000
+MAX_COLUMNS = 256
 
 
 def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
@@ -39,7 +46,12 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
         raise CleaningInputError("원본 파일은 정확히 하나여야 해요")
     source, content = files[0]
     try:
-        units = read_ledger(content, source.original_name)
+        try:
+            units = read_ledger(content, source.original_name)
+        except CleaningInputError:
+            raise
+        except Exception as exc:
+            raise CleaningInputError("수불부 형식 또는 값이 올바르지 않아요") from exc
         if units.empty:
             raise CleaningInputError("수불부에 재고 기록이 없어요")
         if period and (units.stock_date.min() < period[0] or units.stock_date.max() > period[1]):
@@ -49,6 +61,8 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
         metadata = units[[*UNIT_KEY, "sku_barcode", "sku_name", "unit_cost", "source_row"]].drop_duplicates()
         if metadata.duplicated(UNIT_KEY).any():
             raise CleaningInputError("재고관리단위가 중복되었어요")
+        if metadata.groupby("sku_barcode")["unit_cost"].nunique(dropna=False).gt(1).any():
+            raise CleaningInputError("같은 바코드에 서로 다른 원가가 있어요")
         if metadata.groupby("sku_barcode")["sku_name"].nunique().gt(1).any():
             raise CleaningInputError("같은 바코드에 서로 다른 상품명이 있어요")
         total = sum(abs(int(v)) for c in [*MOVES, "closing_qty"] for v in units[c])
@@ -83,11 +97,12 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
                              as_of_date=units.stock_date.max(), products=products, inventory_units=inventory_units,
                              unit_daily_records=records.to_dict("records"),
                              product_daily_stocks=product_daily.to_dict("records"),
-                             validation=dict(checked_sku_count=len(products), target_sku_count=len(products),
+                             validation=dict(checked_sku_count=len(products),
+                                             target_sku_count=len(products) - len(excluded),
                                              excluded_skus=excluded))
     except CleaningInputError:
         raise
-    except (ValueError, TypeError, IndexError, KeyError, OverflowError, OSError, EOFError) as exc:
+    except (ValueError, TypeError, IndexError, KeyError, OverflowError, OSError, EOFError, BadZipFile) as exc:
         raise CleaningInputError("수불부 형식 또는 값이 올바르지 않아요") from exc
 
 
@@ -99,76 +114,109 @@ def read_ledger(content: bytes, original_name: str) -> pd.DataFrame:
     빈칸(입고 전 · 소진 후, 4칸이 함께 빔)인 날은 행을 만들지 않는다. 기초 재고는 여러 파일을 합친 뒤 정한다.
     수량 단위: 개.
     """
-    match = YEAR_MONTH.search(original_name)
-    if match is None:
-        raise ValueError(f"파일명에서 연 · 월을 읽을 수 없어요: {original_name}")
-    year, month = int(match.group(1)), int(match.group(2) or match.group(3))
+    months = {(int(m.group(1)), int(m.group(2))) for pattern in (YEAR_MONTH, KOREAN_MONTH)
+              for m in pattern.finditer(original_name)}
+    if len(months) != 1:
+        raise CleaningInputError("파일명에 유효한 연월 하나가 필요해요")
+    year, month = months.pop()
 
     try:
+        with ZipFile(BytesIO(content)) as archive:
+            entries = archive.infolist()
+            if (sum(info.file_size for info in entries) > MAX_UNCOMPRESSED
+                    or any(info.file_size > 1_000_000 and info.file_size > 1000 * max(info.compress_size, 1)
+                           for info in entries)):
+                raise CleaningInputError("XLSX 압축 해제 크기 제한을 초과했어요")
         wb = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
     except Exception as exc:
         raise CleaningInputError("올바른 XLSX 파일이 아니에요") from exc
-    ws = wb.worksheets[0]
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
+    try:
+        ws = wb.worksheets[0]
+        if not ws.title.strip() or len(ws.title) > 255:
+            raise CleaningInputError("시트 이름이 올바르지 않아요")
+        ws.reset_dimensions()  # 작성자가 위조한 dimension을 신뢰하지 않는다.
+        rows = ws.iter_rows(max_col=MAX_COLUMNS, values_only=True)
+        try:
+            header, day_row = next(rows), next(rows)
+            next(rows)
+            next(rows)
+        except StopIteration as exc:
+            raise CleaningInputError("수불부 헤더가 부족해요") from exc
+        id_cols = {ID_HEADERS[v]: i for i, v in enumerate(header) if v in ID_HEADERS}
+        missing = set(ID_HEADERS.values()) - set(id_cols)
+        if missing:
+            raise ValueError(f"수불부 열을 찾을 수 없어요: {sorted(missing)}")
+        days = [  # (날짜, 입고 칸 위치). 한 날짜는 입고 · 출고 · 조정 · 재고 4칸
+            (date(year, month, int(m.group(1))), i)
+            for i, v in enumerate(day_row)
+            if isinstance(v, str) and (m := DAY_LABEL.match(v))
+        ]
 
-    header, day_row = rows[0], rows[1]
-    id_cols = {ID_HEADERS[v]: i for i, v in enumerate(header) if v in ID_HEADERS}
-    missing = set(ID_HEADERS.values()) - set(id_cols)
-    if missing:
-        raise ValueError(f"수불부 열을 찾을 수 없어요: {sorted(missing)}")
-    days = [  # (날짜, 입고 칸 위치). 한 날짜는 입고 · 출고 · 조정 · 재고 4칸
-        (date(year, month, int(m.group(1))), i)
-        for i, v in enumerate(day_row)
-        if isinstance(v, str) and (m := DAY_LABEL.match(v))
-    ]
-
-    if not days or len({d for d, _ in days}) != len(days):
-        raise CleaningInputError("날짜 열이 없거나 중복되었어요")
-    records = []
-    seen_units = set()
-    for row_no, row in enumerate(rows[DATA_START_ROW - 1:], DATA_START_ROW):
-        if row[id_cols["sku_barcode"]] is None:
-            continue
-        unit = {
-            "source_file": original_name,
-            "source_sheet": ws.title,
-            "source_row": row_no,
-            "source_inventory_key": str(row[id_cols["source_inventory_key"]]),
-            "received_on": _to_date(row[id_cols["received_on"]]),
-            "sku_barcode": _to_text(row[id_cols["sku_barcode"]]),
-            "sku_name": str(row[id_cols["sku_name"]]),
-            "unit_cost": row[id_cols["unit_cost"]],
-        }
-        if (unit["source_inventory_key"] in ("", "None") or unit["sku_name"] in ("", "None")):
-            raise CleaningInputError("상품 또는 재고관리단위 정보가 없어요")
-        key = (unit["source_inventory_key"], unit["received_on"])
-        if key in seen_units:
-            raise CleaningInputError("재고관리단위가 중복되었어요")
-        seen_units.add(key)
-        if unit["unit_cost"] is not None:
-            unit["unit_cost"] = _quantity(unit["unit_cost"], False)
-        for stock_date, col in days:
-            cells = row[col:col + 4]
-            if all(c is None for c in cells):
+        if not days or len({d for d, _ in days}) != len(days):
+            raise CleaningInputError("날짜 열이 없거나 중복되었어요")
+        records = []
+        seen_units = set()
+        seen_products = set()
+        for row_no, row in enumerate(rows, DATA_START_ROW):
+            if row_no > MAX_SOURCE_ROWS + DATA_START_ROW - 1:
+                raise CleaningInputError("원본 행 수 제한을 초과했어요")
+            if row[id_cols["sku_barcode"]] is None:
+                if any(row[id_cols[name]] is not None for name in ("source_inventory_key", "sku_name", "received_on")):
+                    raise CleaningInputError("바코드가 없는 재고 기록이 있어요")
                 continue
-            if len(cells) != 4:
-                raise CleaningInputError("날짜별 수량 열이 부족해요")
-            inbound, outbound, adjustment, closing = (_quantity(c if c is not None else 0, i == 2)
-                                                       for i, c in enumerate(cells))
-            records.append({
-                **unit,
-                "stock_date": stock_date,
-                "inbound_qty": inbound,
-                "outbound_qty": outbound,
-                "adjustment_qty": adjustment,
-                "closing_qty": closing,
-            })
-    return pd.DataFrame(records, columns=[
-        "source_file", "source_sheet", "source_row", "source_inventory_key", "received_on",
-        "sku_barcode", "sku_name", "unit_cost", "stock_date", *MOVES, "closing_qty",
-    ])
+            unit = {
+                "source_file": original_name,
+                "source_sheet": ws.title,
+                "source_row": row_no,
+                "source_inventory_key": str(row[id_cols["source_inventory_key"]]),
+                "received_on": _to_date(row[id_cols["received_on"]]),
+                "sku_barcode": _to_text(row[id_cols["sku_barcode"]]),
+                "sku_name": str(row[id_cols["sku_name"]]),
+                "unit_cost": row[id_cols["unit_cost"]],
+            }
+            if any(
+                not str(unit[k]).strip() or str(unit[k]) == "None"
+                or len(str(unit[k]).encode("utf-16-le")) // 2 > limit
+                for k, limit in (("source_inventory_key", 100), ("sku_barcode", 100), ("sku_name", 200))
+            ):
+                raise CleaningInputError("상품 또는 재고관리단위 정보가 없어요")
+            if unit["source_inventory_key"] != unit["source_inventory_key"].strip():
+                raise CleaningInputError("재고관리단위 식별자가 올바르지 않아요")
+            key = (unit["source_inventory_key"], unit["received_on"])
+            if key in seen_units:
+                raise CleaningInputError("재고관리단위가 중복되었어요")
+            seen_units.add(key)
+            seen_products.add(unit["sku_barcode"])
+            span = (max(d for d, _ in days) - min(d for d, _ in days)).days + 1
+            if len(seen_units) * span > MAX_UNIT_DAYS or len(seen_products) * span > MAX_PRODUCT_DAYS:
+                raise CleaningInputError("정제 집계 크기 제한을 초과했어요")
+            if unit["unit_cost"] is not None:
+                unit["unit_cost"] = _quantity(unit["unit_cost"], False)
+            for stock_date, col in days:
+                cells = row[col:col + 4]
+                if all(c is None for c in cells):
+                    continue
+                if stock_date < unit["received_on"]:
+                    raise CleaningInputError("재고 날짜가 입고일보다 빨라요")
+                if len(cells) != 4:
+                    raise CleaningInputError("날짜별 수량 열이 부족해요")
+                inbound, outbound, adjustment, closing = (_quantity(c if c is not None else 0, i == 2)
+                                                           for i, c in enumerate(cells))
+                records.append({
+                    **unit,
+                    "stock_date": stock_date,
+                    "inbound_qty": inbound,
+                    "outbound_qty": outbound,
+                    "adjustment_qty": adjustment,
+                    "closing_qty": closing,
+                })
+        return pd.DataFrame(records, columns=[
+            "source_file", "source_sheet", "source_row", "source_inventory_key", "received_on",
+            "sku_barcode", "sku_name", "unit_cost", "stock_date", *MOVES, "closing_qty",
+        ])
 
+    finally:
+        wb.close()
 
 def check_stock_balance(units: pd.DataFrame, previous_units=None) -> pd.DataFrame:
     """재고관리단위마다 '기초 + 입고 − 출고 + 조정 = 기말'을 검산한다. units: read_ledger 결과를 합친 표.

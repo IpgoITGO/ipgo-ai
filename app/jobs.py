@@ -4,6 +4,7 @@ from enum import StrEnum
 from pydantic import Field, ValidationError
 
 from app import repository, storage
+from app.execution import engine_slot, validate_calculation_capacity
 from engine import calculate as calculation
 from engine import clean as cleaning
 from engine.backtest import run_backtest
@@ -44,6 +45,11 @@ class ResultEnvelope(CamelModel):
 
 
 def execute(job: JobEnvelope) -> ResultEnvelope:
+    with engine_slot():
+        return _execute(job)
+
+
+def _execute(job: JobEnvelope) -> ResultEnvelope:
     if job.job_type is JobType.CLEAN:
         try:
             request = CleanRequest.model_validate(job.payload)
@@ -52,11 +58,12 @@ def execute(job: JobEnvelope) -> ResultEnvelope:
         response = clean_request(request)
     elif job.job_type is JobType.CALCULATE:
         request = CalculateRequest.model_validate(job.payload)
-        daily = repository.load_product_daily(request.warehouse_id, request.upload_file_ids)
+        validate_calculation_capacity(request)
+        daily = repository.load_product_daily(request.warehouse_id, request.upload_file_ids, user_id=request.user_id)
         response = calculation.calculate(request, daily)
     else:
         request = BacktestRequest.model_validate(job.payload)
-        daily = repository.load_product_daily(request.warehouse_id, request.upload_file_ids)
+        daily = repository.load_product_daily(request.warehouse_id, request.upload_file_ids, user_id=request.user_id)
         response = run_backtest(request, daily)
     return ResultEnvelope(
         job_id=job.job_id,

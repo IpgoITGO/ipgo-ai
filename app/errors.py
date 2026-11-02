@@ -51,12 +51,13 @@ def register_error_handlers(app: FastAPI) -> None:
         return _json(exc.status_code, code, message, headers=exc.headers)  # 405의 Allow 헤더 유지
 
     @app.exception_handler(RequestValidationError)
-    async def _validation(_: Request, exc: RequestValidationError):
+    async def _validation(request: Request, exc: RequestValidationError):
         errors = [
             {"field": ".".join(str(p) for p in e["loc"][1:]), "type": e["type"], "message": e["msg"]}
             for e in exc.errors()
         ]
-        return _json(422, "INVALID_INPUT", "요청 형식이 연동 명세와 맞지 않아요", {"errors": errors})
+        return _json(422, "INVALID_SOURCE" if request.url.path == "/engine/clean" else "INVALID_INPUT",
+                     "요청 형식이 연동 명세와 맞지 않아요", {"errors": errors})
 
     @app.exception_handler(NotImplementedError)
     async def _not_implemented(_: Request, exc: NotImplementedError):

@@ -133,3 +133,18 @@ def test_rejects_period_and_previous_gap(client, monkeypatch):
         set(), {("A", date(2026, 4, 1)): 10}, (date(2026, 5, 1), date(2026, 5, 31))))
     monkeypatch.setattr(jobs.storage, "read_source_file", lambda _: build_ledger([2], [UNIT]))
     assert client.post("/engine/clean", json=PAYLOAD).status_code == 422
+
+
+def test_checked_and_excluded_counts_follow_stock_balance(client, monkeypatch):
+    # A: 기초 10 → 8 → 7, B: 기초 10 → 8, 다음 날 기말 6은 출고 1과 불일치.
+    monkeypatch.setenv("ENGINE_MODE", "real")
+    monkeypatch.setattr(repository, "load_cleaning_context", lambda *_: (set(), {}, None))
+    other = {**UNIT, "barcode": "DEF", "mixed_id": "B", "name": "상품 B",
+             "records": {1: (0, 2, 0, 8), 2: (0, 1, 0, 6)}}
+    monkeypatch.setattr(jobs.storage, "read_source_file", lambda _: build_ledger([1, 2], [UNIT, other]))
+    result = client.post("/engine/clean", json=PAYLOAD)
+    assert result.status_code == 200
+    report = result.json()["validation"]
+    assert report["checkedSkuCount"] == 2
+    assert report["targetSkuCount"] == 1
+    assert [sku["skuBarcode"] for sku in report["excludedSkus"]] == ["DEF"]

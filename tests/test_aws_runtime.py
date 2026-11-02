@@ -48,7 +48,7 @@ def test_s3_storage_reader_uses_bucket_and_original_key(monkeypatch):
 
 
 def test_worker_returns_contract_failure_for_unimplemented_engine(monkeypatch):
-    monkeypatch.setattr(jobs.repository, "load_product_daily", lambda *_: pd.DataFrame())
+    monkeypatch.setattr(jobs.repository, "load_product_daily", lambda *_, **_kw: pd.DataFrame())
     monkeypatch.setattr(jobs.calculation, "calculate", lambda *_: (_ for _ in ()).throw(NotImplementedError()))
     body = json.dumps(
         {
@@ -67,7 +67,7 @@ def test_worker_returns_contract_failure_for_unimplemented_engine(monkeypatch):
 
 
 def test_job_dispatch_returns_camel_case_result(monkeypatch):
-    monkeypatch.setattr(jobs.repository, "load_product_daily", lambda *_: pd.DataFrame())
+    monkeypatch.setattr(jobs.repository, "load_product_daily", lambda *_, **_kw: pd.DataFrame())
     monkeypatch.setattr(jobs.calculation, "calculate", lambda *_: load_mock("calculate", CalculateResponse))
     envelope = jobs.JobEnvelope.model_validate(
         {
@@ -96,10 +96,13 @@ def test_database_reader_uses_read_only_connection_and_source_filter(monkeypatch
         def __exit__(self, *_args):
             return None
 
-        def execute(self, query, params):
+        def execute(self, query, params=None):
+            self.query = query
             executed.append((query, params))
 
         def fetchall(self):
+            if "ai_cleaning_sources_v1" in self.query:
+                return [(21, 1, 3, "DONE"), (22, 1, 3, "DONE")]
             return [(11, 3.5)]
 
     class Connection:
@@ -122,23 +125,24 @@ def test_database_reader_uses_read_only_connection_and_source_filter(monkeypatch
     monkeypatch.setenv("DATABASE_URL", "postgresql://reader@database/ipgo")
     monkeypatch.setattr(repository.psycopg, "connect", lambda *_args, **_kwargs: connection)
 
-    result = repository.load_product_daily(3, [21, 22])
+    result = repository.load_product_daily(3, [21, 22], user_id=1)
 
     assert connection.read_only is True
     assert connection.rolled_back is True
-    assert executed[0][1] == (3, [21, 22])
+    assert executed[-1][1] == (3, [21, 22])
     assert result.to_dict(orient="records") == [{"product_id": 11, "closing_qty": 3.5}]
 
 
 def test_clean_job_passes_source_bytes_and_known_barcodes(monkeypatch):
     calls = []
 
-    def clean(files, known_barcodes):
+    def clean(files, known_barcodes, previous, period):
         calls.append((files, known_barcodes))
         raise NotImplementedError
 
     monkeypatch.setattr(jobs.storage, "read_source_file", lambda _source: b"xlsx")
-    monkeypatch.setattr(jobs.repository, "load_known_barcodes", lambda _user_id: {"8800000000001"})
+    monkeypatch.setattr(jobs.repository, "load_cleaning_context",
+                        lambda *_: ({"8800000000001"}, {}, None))
     monkeypatch.setattr(jobs.cleaning, "clean", clean)
     body = json.dumps({"contractVersion": "1", "jobId": "clean-12", "jobType": "CLEAN", "payload": CLEAN_REQUEST})
 

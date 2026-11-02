@@ -1,4 +1,5 @@
 """Optional co-hosted worker lifecycle and health supervision."""
+import asyncio
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -33,7 +34,7 @@ async def lifespan(app: FastAPI):
     finally:
         stop.set()
         if thread:
-            thread.join(timeout=30)
+            await asyncio.to_thread(thread.join, 30)
             if thread.is_alive():
                 logger.error("embedded worker did not stop before shutdown deadline")
         app.state.worker_thread = None

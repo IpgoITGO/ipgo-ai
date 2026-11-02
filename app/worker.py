@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from app.config import get_settings
 from app.jobs import JobEnvelope, JobError, JobStatus, JobType, ResultEnvelope, execute
 from engine.calculate import CalculationInputError
+from engine.clean import CleaningInputError
 from schemas.engine import BacktestRequest, CalculateRequest, CleanRequest
 
 logger = logging.getLogger(__name__)
@@ -38,9 +39,12 @@ def process_message(body: str) -> ResultEnvelope:
         {JobType.CLEAN: CleanRequest, JobType.CALCULATE: CalculateRequest,
          JobType.BACKTEST: BacktestRequest}[job.job_type].model_validate(job.payload)
     except ValidationError:
-        return _failure(job, "INVALID_INPUT", "입력값을 확인해 주세요.")
+        code = "INVALID_SOURCE" if job.job_type is JobType.CLEAN else "INVALID_INPUT"
+        return _failure(job, code, "입력값을 확인해 주세요.")
     try:
         return execute(job)
+    except CleaningInputError:
+        return _failure(job, "INVALID_SOURCE", "원본을 확인해 주세요.")
     except CalculationInputError:
         return _failure(job, "INVALID_INPUT", "입력값을 확인해 주세요.")
     except NotImplementedError:
@@ -60,10 +64,15 @@ def create_worker():
 
 def run_loop(stop: threading.Event, settings, sqs) -> None:
     while not stop.is_set():
-        response = sqs.receive_message(
-            QueueUrl=settings.jobs_queue_url, MaxNumberOfMessages=1,
-            WaitTimeSeconds=20, VisibilityTimeout=900,
-        )
+        try:
+            response = sqs.receive_message(
+                QueueUrl=settings.jobs_queue_url, MaxNumberOfMessages=1,
+                WaitTimeSeconds=20, VisibilityTimeout=900,
+            )
+        except Exception:
+            logger.warning("queue receive failed; retrying")
+            stop.wait(2)
+            continue
         for message in response.get("Messages", []):
             if stop.is_set():
                 break

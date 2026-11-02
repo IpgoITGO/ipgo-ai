@@ -3,10 +3,10 @@
 입고ITGO의 FastAPI 서버입니다. 수불부 정제 · 입고 계산 엔진과 AI 인사이트를 담당합니다.
 Spring Boot 백엔드가 이 서버를 호출하고, 계산 결과 저장은 백엔드가 합니다.
 
-> 기본 실행은 API 명세서 예시를 돌려주는 mock 모드입니다. `ENGINE_MODE=real`이면 입고 수량 계산과
-> 직접 입력 시나리오는 기존 계산 함수를 사용하고, `/engine/insight`는 실제 LLM으로 자리 표시자
-> 문장 초안을 만들고 검사합니다(`OPENAI_API_KEY` 필요). 정제 응답 조립·위험·정확도·계산 결과의
-> 인사이트 입력 변환과 Spring 저장 연동은 아직 미완료입니다.
+기본 HTTP 실행은 mock입니다. `ENGINE_MODE=real`에서는 단일 XLSX 정제와 계산·직접 시나리오에
+실제 엔진을 연결합니다. 백테스트 구현과 계산 결과에서 인사이트 입력을 만드는 변환은 아직
+미완료입니다. `/engine/insight`의 LLM은 계산과 별도로 동작하며 사용할 때만 API key가 필요합니다.
+이 변경은 배포하지 않았고 실제 RDS·S3·SQS·Spring 저장을 통합 검증하지 않았습니다.
 
 ## 실행
 
@@ -41,6 +41,7 @@ ruff check .                     # 코드 검사
 | 이름 | 설명 | 기본값 |
 |---|---|---|
 | `ENGINE_MODE` | `mock`이면 명세 예시 응답, `real`이면 실제 계산 | `mock` |
+| `IPGO_EMBEDDED_WORKER_ENABLED` | API 프로세스 안에서 SQS worker 실행 | `false` |
 | `DATABASE_URL` | 승인된 view만 조회하는 PostgreSQL read-only 연결 | 없음 |
 | `STORAGE_BASE` | 로컬 개발용 원본 엑셀 root. AWS에서는 S3 설정을 우선 사용 | 없음 |
 | `AWS_REGION` | S3·SQS를 사용할 AWS Region | `ap-northeast-2` |
@@ -78,22 +79,39 @@ ruff check .                     # 코드 검사
 선택한 상품 기록 중 기준일까지의 유효 관측일 수입니다. 시나리오의 기간 내 소진일·미충족 수요는
 기존 DA-06 `simulate()`의 실제 계산 결과입니다.
 
-현재 요청과 DB view에는 검산 제외 사유가 없어 `EXCLUDED` 판정은 이 연결에서 새로 만들지 않습니다.
-정제·제외 상품 전달 계약, 월 경계 검산, `clean()` 조립, 실제 DB/SQS·Spring 저장 연동은 별도입니다.
-worker는 HTTP의 mock 분기를 사용하지 않으므로 `ENGINE_MODE=mock`이어도 실제 계산 함수를 호출합니다.
+현재 요청과 DB view에는 검산 제외 사유가 없어 계산 연결에서 `EXCLUDED` 판정을 새로 만들지
+않습니다. 정제는 불일치 상품을 validation에 보고하며 checked는 전체 상품 수, target은 그중
+고유 제외 상품을 뺀 수입니다. Spring이 정제 결과를 저장한 뒤 계산용 view를 제공합니다.
+계산 요청의 모든 업로드 ID는 같은 읽기 전용 DB 연결에서 회원·창고·DONE 상태를 먼저 확인합니다.
+DB 미설정은 계산 성공으로 대체하지 않습니다. DB 연결 제한은 5초, 각 SQL 제한은 10초입니다.
 
-검증:
+### 현재 용량 제한
 
-```bash
-pytest -q tests/test_calculate.py   # 기존 DA-03/04/06 손계산 표 + 실제 계산 HTTP/dispatch 경로
-pytest -q
-ruff check .
-```
+이 값은 계산 정책이나 정확도 기준이 아니라 현재 서비스의 보호 한도입니다.
 
-연결 테스트는 DB 조회만 대체하고 계산 함수는 실제로 실행합니다. AWS queue·실제 PostgreSQL·31개
-상품의 전체 사용자 흐름을 검증한 것은 아닙니다. 기본 mock 응답과 `clean`·`backtest`의 미구현
-경로는 그대로 유지합니다. `/engine/insight`의 real LLM 호출은 구현되어 있지만, 이 계산 결과에서
-인사이트 입력을 만드는 변환과 Spring 연결은 별도 작업입니다.
+- XLSX 원본은 10 MiB, 압축 해제 합계는 64 MiB 이하입니다. 1 MB를 넘는 항목의 압축비가
+  1000배를 넘으면 거부합니다. 원본 행은 최대 100,000개, 정제 격자는 재고관리단위×일
+  50,000개 및 상품×일 10,000개입니다. XLSX는 단일 파일이며 잘못된 원본은 `INVALID_SOURCE`입니다.
+- 상품별 `leadTimeDays + reviewCycleDays`는 최대 366일, `today - asOfDate`는 최대 730일,
+  계산 요청의 세 시나리오 예상 결과는 총 10,000일 이내입니다. 초과하면 `INVALID_INPUT`입니다.
+- 한 Python 프로세스에서 정제·계산·시나리오·백테스트는 동시에 하나만 실행합니다. 사용 중인
+  HTTP 요청은 503 `ENGINE_BUSY`, worker 메시지는 삭제하지 않고 재시도합니다. 이 잠금은 프로세스
+  간 공유되지 않으므로 one-box에서는 API 프로세스 하나와 embedded worker 하나만 사용해야 합니다.
+  한도 전체 조합이 256 MiB에서 안전하다고 검증한 것은 아닙니다.
+
+worker는 `ENGINE_MODE`와 관계없이 실제 엔진을 호출합니다. `IPGO_EMBEDDED_WORKER_ENABLED=true`면
+API에 worker thread를 띄우고 두 SQS queue URL이 필요합니다. `/health`의 mode는 HTTP 설정을 뜻하며,
+embedded worker가 비정상 종료되면 health가 503입니다. worker는 결과 발행 후 메시지를 삭제하므로
+발행 또는 삭제 실패 시 중복 결과가 가능하고 Spring은 job ID로 중복을 처리해야 합니다. SQS 수신 오류는
+짧게 기다린 후 재시도합니다. 가시성 timeout은 900초이며 자동 갱신하지 않습니다. 결과가 900,000바이트를
+넘으면 `RESULT_TOO_LARGE`로 실패합니다.
+
+256 MiB 격리 로컬 컨테이너의 합성 31상품·31일 테스트에서 같은 프로세스의 정제는 0.32초,
+계산은 0.25초, cgroup peak는 약 155 MiB였습니다. OOM 및 재시작은 없었습니다. 이는 단일
+합성 사례이며 실제 RDS, 네트워크, 동시 부하 및 최대 허용 크기에 대한 검증이 아닙니다.
+
+검증: `pytest -q`, `ruff check .`. 정제 연결 테스트는 가짜 XLSX를 사용하고 계산 연결 테스트는
+DB 조회만 대체합니다. 실제 업무 연동 완료나 배포 승인을 뜻하지 않습니다.
 
 ## AWS 데이터 접근 계약
 
@@ -123,9 +141,8 @@ AWS에서는 `DATABASE_URL`에 조회 전용 PostgreSQL role만 사용합니다.
 FastAPI service와 worker task definition을 함께 갱신합니다. GitHub `dev` Environment 승인과
 `AWS_DEPLOY_ROLE_ARN`, `AWS_ACCOUNT_ID` 변수가 필요합니다. 첫 배포의 기본값은 API 1개,
 worker 0개, `ENGINE_MODE=mock`입니다. `mock` 배포에서는 API task definition에서
-`OPENAI_API_KEY` secret 주입을 제외합니다. `real` 배포에서는 Secrets Manager ARN을 담은
-GitHub 변수 `AWS_AI_OPENAI_SECRET_ARN`이 필요합니다. 실제 계산 엔진과 OpenAI key가 준비된
-뒤에만 `real`을 선택하고, 비동기 job 처리가 필요할 때만 worker를 1개 이상 켭니다.
+`OPENAI_API_KEY` secret 주입을 제외합니다. LLM을 별도로 활성화할 때만 Secrets Manager ARN을 담은
+GitHub 변수 `AWS_AI_OPENAI_SECRET_ARN`이 필요합니다. real 계산에 LLM key는 필요하지 않습니다.
 
 자세한 경계와 전환 조건은 [구조와 연동](docs/architecture.md)과
 [계산 엔진 연동 계약](docs/decisions/0001-engine-contract.md)을 봅니다.

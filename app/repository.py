@@ -6,15 +6,6 @@ from app.config import get_settings
 from app.errors import AppError
 
 
-def load_known_barcodes(user_id: int) -> set[str]:
-    """이 회원의 이미 등록된 상품 바코드 (CleanedProduct.is_new 판정용). DB 연결 전에는 빈 집합 → 모두 새 상품."""
-    if get_settings().database_url is None:
-        return set()
-    # TODO(합의): DB 접근 방식은 #18에서 정함. products를 읽을 view · 열 이름을 Spring과 정한 뒤 구현
-    raise NotImplementedError("products reader")
-
-
-
 def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,
                           previous_upload_file_id: int | None, source):
     """정제 원본과 직전 월 최신 revision을 읽고 요청 소유권을 검증한다."""
@@ -28,7 +19,7 @@ def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,
             raise CleaningInputError("업로드 식별자가 일치하지 않아요")
         return set(), {}, None
     try:
-        with psycopg.connect(settings.database_url, autocommit=False) as connection:
+        with psycopg.connect(settings.database_url, autocommit=False, connect_timeout=5) as connection:
             connection.read_only = True
             try:
                 with connection.cursor() as cursor:
@@ -88,7 +79,7 @@ def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,
     except psycopg.Error as exception:
         raise AppError(503, "DATABASE_UNAVAILABLE", "정제 데이터를 읽지 못했어요") from exception
 
-def load_product_daily(warehouse_id: int, upload_file_ids: list[int]) -> pd.DataFrame:
+def load_product_daily(warehouse_id: int, upload_file_ids: list[int], *, user_id: int) -> pd.DataFrame:
     """ai_product_daily_stocks_v1에서 지정된 source만 읽는다."""
     settings = get_settings()
     if settings.database_url is None:
@@ -115,13 +106,26 @@ def load_product_daily(warehouse_id: int, upload_file_ids: list[int]) -> pd.Data
         ORDER BY product_id, stock_date, upload_file_id
     """
     try:
-        with psycopg.connect(settings.database_url, autocommit=False) as connection:
+        with psycopg.connect(settings.database_url, autocommit=False, connect_timeout=5) as connection:
             connection.read_only = True
-            with connection.cursor() as cursor:
-                cursor.execute(query, (warehouse_id, upload_file_ids))
-                rows = cursor.fetchall()
-                columns = [column.name for column in cursor.description or []]
-            connection.rollback()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = '10s'")
+                    cursor.execute("""SELECT upload_file_id, user_id, warehouse_id, status
+                                      FROM ai_cleaning_sources_v1 WHERE upload_file_id = ANY(%s)""",
+                                   (upload_file_ids,))
+                    sources = cursor.fetchall()
+                    requested = set(upload_file_ids)
+                    if (len(sources) != len(requested) or len(requested) != len(upload_file_ids)
+                            or {row[0] for row in sources} != requested
+                            or any(row[1:] != (user_id, warehouse_id, "DONE") for row in sources)):
+                        from engine.calculate import CalculationInputError
+                        raise CalculationInputError("원본의 소유권, 창고 또는 완료 상태가 올바르지 않아요")
+                    cursor.execute(query, (warehouse_id, upload_file_ids))
+                    rows = cursor.fetchall()
+                    columns = [column.name for column in cursor.description or []]
+            finally:
+                connection.rollback()
         return pd.DataFrame(rows, columns=columns)
     except psycopg.Error as exception:
         raise AppError(

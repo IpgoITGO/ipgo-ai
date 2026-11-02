@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from app import repository
 from app.config import get_settings
 from app.errors import AppError
+from app.execution import engine_slot, validate_calculation_capacity
 from app.jobs import clean_request
 from app.mocks import load_mock
 from engine import calculate as calc
@@ -33,7 +34,8 @@ def clean(req: CleanRequest) -> CleanResponse:
     if _mock_mode():
         return load_mock("clean", CleanResponse)
     try:
-        return clean_request(req)
+        with engine_slot():
+            return clean_request(req)
     except CleaningInputError as exc:
         raise AppError(422, "INVALID_SOURCE", str(exc)) from exc
 
@@ -43,8 +45,10 @@ def calculate(req: CalculateRequest) -> CalculateResponse:
     """DA-03 ~ DA-07 · DA-11 · DA-13 입고 계산."""
     if _mock_mode():
         return load_mock("calculate", CalculateResponse)
-    daily = repository.load_product_daily(req.warehouse_id, req.upload_file_ids)
-    return calc.calculate(req, daily)
+    with engine_slot():
+        validate_calculation_capacity(req)
+        daily = repository.load_product_daily(req.warehouse_id, req.upload_file_ids, user_id=req.user_id)
+        return calc.calculate(req, daily)
 
 
 @router.post("/scenarios", response_model=ScenarioResult, response_model_by_alias=True)
@@ -53,8 +57,10 @@ def scenarios(req: ScenarioRequest) -> ScenarioResult:
     if _mock_mode():
         return load_mock("scenarios", ScenarioResult)
     ci = req.calculation_input
-    daily = repository.load_product_daily(ci.warehouse_id, ci.upload_file_ids)
-    return calc.custom_scenario(req, daily)
+    with engine_slot():
+        validate_calculation_capacity(ci)
+        daily = repository.load_product_daily(ci.warehouse_id, ci.upload_file_ids, user_id=ci.user_id)
+        return calc.custom_scenario(req, daily)
 
 
 @router.post("/backtest", response_model=BacktestResponse, response_model_by_alias=True)
@@ -62,5 +68,6 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
     """DA-08 ~ DA-10 · DA-12 · DA-13 정확도 평가 (팀 내부용)."""
     if _mock_mode():
         return load_mock("backtest", BacktestResponse)
-    daily = repository.load_product_daily(req.warehouse_id, req.upload_file_ids)
-    return run_backtest(req, daily)
+    with engine_slot():
+        daily = repository.load_product_daily(req.warehouse_id, req.upload_file_ids, user_id=req.user_id)
+        return run_backtest(req, daily)

@@ -9,10 +9,9 @@ CALC_REQUEST = {
 }
 
 CLEAN_REQUEST = {
-    "uploadId": 15, "userId": 1, "warehouseId": 3,
+    "uploadId": 21, "userId": 1, "warehouseId": 3,
     "files": [
         {"uploadFileId": 21, "storageKey": "uploads/1/2026-09.xlsx", "originalName": "2026-09.xlsx"},
-        {"uploadFileId": 22, "storageKey": "uploads/1/2026-10.xlsx", "originalName": "2026-10.xlsx"},
     ],
 }
 

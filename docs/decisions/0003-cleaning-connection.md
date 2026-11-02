@@ -18,9 +18,14 @@ Spring V14는 읽기 전용 view 세 개를 제공한다.
 DB 설정이 없는 로컬 실행에서만 빈 context를 사용한다.
 
 원본 행의 sheet·row와 단위 식별자를 보존하고 DA-01 검산 및 DA-02 관측 판정을 상품별로
-반환한다. `CleaningInputError`는 `CalculationInputError`를 상속하며 HTTP는 422
-`INVALID_SOURCE`로 반환한다. worker 담당 구현은 같은 예외를 먼저 잡아 `FAILED/INVALID_SOURCE`로
-발행해야 한다. 현재 worker는 상위 예외를 잡아 `INVALID_INPUT`으로 발행한다. 요청 스키마 오류도
-worker가 영구 재시도하지 않도록 CLEAN dispatch에서 정제 입력 오류로 변환한다.
+반환한다. checked는 전체 상품 수이고 target은 검산에서 제외된 고유 상품 수를 뺀 값이다.
+`CleaningInputError`와 잘못된 CLEAN payload는 HTTP 422 또는 worker `FAILED/INVALID_SOURCE`다.
+동일 바코드의 원가가 서로 다르거나 입고일 전 재고 기록이 있으면 원본 오류다.
+
+계산에 필요한 모든 업로드는 같은 read-only DB transaction의 `ai_cleaning_sources_v1`에서
+회원·창고·DONE을 확인한 다음 일별 view를 조회한다. DB가 없으면 계산을 진행하지 않는다.
+XLSX 압축 해제와 정제 격자, 계산 기간 및 프로세스 동시 실행에는 README의 용량 제한을 적용한다.
+이 한도는 계산 정책이 아니다. worker는 실패한 수신을 재시도하고 발행 후 삭제하여 at-least-once를
+유지한다. 프로세스별 단일 실행 잠금은 별도 프로세스와 공유되지 않는다.
 
 실제 PostgreSQL view, S3, SQS 및 Spring 저장과 결과 크기 제한은 별도 통합 검증이 필요하다.
