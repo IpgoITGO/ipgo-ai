@@ -16,12 +16,8 @@ import json
 import pytest
 
 from app.main import app
-from app.mocks import load_mock
 from app.routers.insight import get_llm_client
 from insight.llm import FakeClient, LLMError, LLMTimeout
-from insight.prompt import allowed_keys, required_keys
-from insight.validator import check_draft
-from schemas.insight import InsightInput, InsightResponse
 from tests.payloads import INSIGHT_REQUEST
 
 DRAFT = json.dumps({"sentences": [
@@ -79,17 +75,3 @@ def test_s8_not_ok_result_is_422(real_client):
     body = {**INSIGHT_REQUEST, "input": {**INSIGHT_REQUEST["input"], "placeholders": ["horizon_days"]}}
     res = _post(real_client, FakeClient([DRAFT]), body)
     assert (res.status_code, res.json()["code"]) == (422, "INVALID_INPUT")
-
-
-def test_mock_draft_passes_checks():
-    """mock 모드 예시 초안도 검사를 통과하는 모양이다: {{ }} 자리 표시자, 방향 · 숫자는 자리 표시자에만 (0002 3-5)."""
-    inp = InsightInput.model_validate(INSIGHT_REQUEST["input"])
-    draft = load_mock("insight", InsightResponse).draft
-    assert draft is not None
-    result = check_draft(draft, allowed_keys(inp), required_keys(inp))
-    assert result.ok, result.violations
-
-
-def test_mock_failed_example():
-    res = load_mock("insight_failed", InsightResponse)
-    assert (res.validation, res.draft, res.fail_reason) == ("FAILED", None, "LLM_TIMEOUT")

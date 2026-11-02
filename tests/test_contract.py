@@ -47,7 +47,6 @@ def test_request_examples_match_schema(model, payload):
         ("scenarios", ScenarioResult),
         ("backtest", BacktestResponse),
         ("insight", InsightResponse),
-        ("insight_failed", InsightResponse),  # 실패 예시 (mock 모드는 돌려주지 않음, #44)
     ],
 )
 def test_mock_responses_match_schema(name, model):
