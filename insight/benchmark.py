@@ -9,7 +9,6 @@
 """
 import argparse
 import json
-import re
 import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -18,7 +17,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from insight.llm import FakeClient, LLMClient, LLMError, OpenAIClient
-from insight.validator import MAX_SENTENCES, MIN_SENTENCES, PLACEHOLDER_RE, check_draft
+from insight.prompt import draft_text
+from insight.validator import check_draft
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "insight_prompts.json"
 DEFAULT_MODELS = ["gpt-4o-mini", "gpt-4o"]
@@ -56,26 +56,6 @@ def load_cases(path: Path = FIXTURE) -> tuple[str, list[Case]]:
     #   - 값 넣기 · 방향 문구 위치: #24 ①
     data = json.loads(path.read_text(encoding="utf-8"))
     return data["system"], [Case(c["id"], c["values"], c["user"], c["allowed"], c["required"]) for c in data["cases"]]
-
-
-def draft_text(raw: str) -> str | None:
-    """2~3개 항목에 완결된 문장 하나씩 있는지 확인한 뒤 잇는다. 형식이 아니면 None."""
-    try:
-        obj = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    sentences = obj.get("sentences") if isinstance(obj, dict) else None
-    if (not isinstance(sentences, list) or not MIN_SENTENCES <= len(sentences) <= MAX_SENTENCES
-            or not all(isinstance(s, str) for s in sentences)):
-        return None
-    for sentence in sentences:
-        # 합치거나 공백을 정리하기 전에 빈 항목·줄바꿈·문장 조각·여러 문장을 거른다.
-        if sentence.splitlines() != [sentence]:
-            return None
-        body = PLACEHOLDER_RE.sub("값", sentence.strip())
-        if re.fullmatch(r"[^.!?]+[.!?]", body) is None:
-            return None
-    return " ".join(s.strip() for s in sentences)
 
 
 def check(raw: str, case: Case) -> tuple[bool, str | None]:

@@ -116,6 +116,47 @@ def test_sentence_count(text):
     assert "format" in _check(text).codes
 
 
+# 시나리오 짝 검사 (#43). 0002 snake_case 이름, 정상 상태 작성 예시 (가)
+SNAKE = (
+    "{{method}} 기준 권장 입고량은 {{qty_p100}}개이며, 다음 입고 때 {{ending_p100}}개가 남고 "
+    "도착 후 품절 위험은 {{risk_basis}} 추정치로 {{risk_post_p100}}입니다. "
+    "{{label_p80}}인 {{qty_p80}}개로 {{action_p80}} 남는 재고는 {{dir_ending_p80_connect}} "
+    "품절 위험은 {{risk_post_p80}}로 {{dir_risk_post_p80_end}}. "
+    "새 물량이 도착하기 전까지의 품절 위험은 수량과 관계없이 {{risk_pre}}입니다."
+)
+SNAKE_ALLOWED = {
+    "method", "qty_p100", "ending_p100", "risk_basis", "risk_post_p100", "label_p80", "qty_p80", "action_p80",
+    "dir_ending_p80_connect", "dir_risk_post_p80_end", "risk_post_p80", "risk_pre", "label_p120", "qty_p120",
+    "action_p120", "dir_ending_p120_connect", "dir_ending_p120_end", "risk_post_p120", "dir_risk_post_p120_end",
+}
+
+
+def test_scenario_pair_pass():
+    assert check_draft(SNAKE, SNAKE_ALLOWED, REQUIRED).ok
+
+
+def test_scenario_pair_pass_two_scenarios_in_one_sentence():
+    # 한 문장에서 80% · 120%를 함께 비교하면 둘 다 주어
+    text = SNAKE.replace(
+        "{{dir_risk_post_p80_end}}.",
+        "{{dir_risk_post_p80_end}}, {{qty_p120}}개로 {{action_p120}} 위험은 {{dir_risk_post_p120_end}}.")
+    assert "scenario_mismatch" not in check_draft(text, SNAKE_ALLOWED, REQUIRED).codes
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("{{dir_ending_p80_connect}}", "{{dir_ending_p120_connect}}"),  # 10/30 실제 응답: 80% 문장에 120% 방향
+        ("{{risk_post_p80}}로", "{{risk_post_p120}}로"),                  # 80% 문장에 120% 위험 값
+        ("{{risk_pre}}입니다.", "{{risk_pre}}이고 재고는 {{dir_ending_p80_connect}} 남습니다."),  # 주어 없는 방향
+    ],
+)
+def test_scenario_mismatch(old, new):
+    text = SNAKE.replace(old, new)
+    assert text != SNAKE
+    assert "scenario_mismatch" in check_draft(text, SNAKE_ALLOWED, REQUIRED).codes
+
+
 def test_validator_uses_standard_library_only():
     path = Path(__file__).resolve().parents[1] / "insight" / "validator.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))

@@ -84,6 +84,7 @@ SQS는 at-least-once 전달을 전제로 `jobId` 또는 `runId`를 멱등성 기
 | 501 | `NOT_IMPLEMENTED` | 아직 구현하지 않은 기능 |
 | 501 | `STORAGE_NOT_CONFIGURED` | 현재 실행 환경의 local/S3 storage adapter가 설정되지 않음 |
 | 501 | `DATABASE_NOT_CONFIGURED` | 현재 실행 환경의 읽기 전용 DB 연결이 설정되지 않음 |
+| 501 | `LLM_NOT_CONFIGURED` | `real` 모드인데 `OPENAI_API_KEY`가 없음 (`/engine/insight`) |
 | 500 | `ENGINE_ERROR` | 예상하지 못한 오류. 내부 내용은 응답에 넣지 않고 서버 로그에만 남김 |
 
 계산 불가(`NOT_CALCULABLE`)와 AI 대체 문장은 오류가 아니라 정상 응답 안의 상태값입니다.
