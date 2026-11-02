@@ -85,7 +85,10 @@ def test_calculation_matches_da04_hand_calculations(case):
         assert scenario.daily_projection[0].date == request.today + timedelta(days=1)
         assert scenario.daily_projection[-1].date == request.today + timedelta(days=result.horizon_days)
         assert scenario.post_arrival_risk is None
-    assert result.expected_shortage_on is None
+    if not int(qty):
+        assert result.expected_shortage_on is None
+    elif result.expected_shortage_on is not None:
+        assert request.today < result.expected_shortage_on <= request.today + timedelta(days=result.horizon_days)
     assert result.risk_status is None and result.pre_arrival_risk is None and result.risk_sample_size is None
     assert result.accuracy_grade is None and result.cover_trial_count is None
     pd.testing.assert_frame_equal(daily, original)
@@ -298,3 +301,20 @@ def test_invalid_calculation_date_is_http_422_and_terminal_worker_failure(client
     job = JobEnvelope(contractVersion="1", jobId="invalid-date", jobType="CALCULATE", payload=request.to_json_dict())
     result = process_message(job.model_dump_json(by_alias=True))
     assert result.status == "FAILED" and result.error.code == "INVALID_INPUT"
+
+
+def test_no_new_order_shortage_date_matches_constant_daily_hand_calculation():
+    # 45 on Oct 31 - two days * 5 = 35 on Nov 2; 35 / 5 = seven more days.
+    request = request_for(date(2026, 10, 31), date(2026, 11, 2), horizon=12, lead=5)
+    [result] = calculate(request, daily_rows(101, request.as_of_date, 5, 45)).results
+    assert result.recommended_qty == 25
+    assert result.expected_shortage_on == date(2026, 11, 9)
+
+
+def test_existing_receipt_defers_shortage_in_same_coverage_window():
+    # The known receipt contributes 10 units before depletion: (35 + 10) / 5 = nine days.
+    request = request_for(date(2026, 10, 31), date(2026, 11, 2), horizon=12, lead=5,
+                          receipts=[(date(2026, 11, 5), 10)])
+    [result] = calculate(request, daily_rows(101, request.as_of_date, 5, 45)).results
+    assert result.recommended_qty == 15
+    assert result.expected_shortage_on == date(2026, 11, 11)

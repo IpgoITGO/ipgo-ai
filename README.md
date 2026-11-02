@@ -73,8 +73,9 @@ ruff check .                     # 코드 검사
 422 `INVALID_INPUT`입니다. worker에서 발생한 `CalculationInputError`는 `FAILED/INVALID_INPUT`으로
 반환합니다. 일반 DB·네트워크 오류의 기존 재시도 방식은 유지합니다.
 
-이 단계의 `engineVersion`은 `0.2.0`입니다. DA-05 소진 예상일, DA-07 품절 위험, DA-13 정확도와
-백테스트는 아직 계산하지 않습니다. `expectedShortageOn`, `riskStatus`, 위험도·표본 수·정확도 등급·
+이 단계의 `engineVersion`은 `0.2.0`입니다. 입고가 필요한 계산의 `expectedShortageOn`은 신규 입고 0개·기존 발주를 반영한 시뮬레이션에서
+커버 기간 안에 재고가 처음 0이 되는 날짜입니다. 기간 밖의 소진일을 임의로 추정하지 않습니다.
+DA-07 품절 위험, DA-13 정확도와 백테스트는 아직 계산하지 않습니다. `riskStatus`, 위험도·표본 수·정확도 등급·
 평가 수치는 `null`이며 **품절 없음, 위험 0%, 평가 통과를 뜻하지 않습니다.** `validObservationDays`는
 선택한 상품 기록 중 기준일까지의 유효 관측일 수입니다. 시나리오의 기간 내 소진일·미충족 수요는
 기존 DA-06 `simulate()`의 실제 계산 결과입니다.
