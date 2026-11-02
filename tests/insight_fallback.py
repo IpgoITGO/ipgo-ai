@@ -1,6 +1,7 @@
 """기본 문장 시험용 기준 구현 (#44). 운영 코드가 아니다: 기본 문장 생성 · 대체는 Spring이 한다 (#24).
 
-#4 문서 6장 template으로 상태별 기대 문장을 만들어 Spring 구현(IpgoITGO/ipgo-server#61)과 대조할 기준으로 쓴다.
+#4 문서 6장(Spring 구현용) template으로 상태별 기대 문장을 만들어
+Spring 구현(IpgoITGO/ipgo-server#61)과 대조할 기준으로 쓴다.
 참조 구현 ai_insight의 fallback.py · placeholders.py를 0002 이름(#4 문서 5장)과 6장 조각으로 옮겼다.
 
 - 조각에 필요한 키가 없으면 None: 문장 없이 비교표만 (#44 시나리오 13, template_error).
@@ -29,6 +30,7 @@ PIECES = {
              "예측하고 여유 배수 {{multiplier}}를 적용한 뒤, 현재 재고 {{start_stock}}개와 도착 예정 물량 "
              "{{planned_receipts}}개를 뺀 권장 입고량은 {{qty_p100}}개입니다.",
     "method_reason": "이 산식을 쓴 이유: {{method_reason}}.",
+    "no_date": "도착 예정일이 없는 기존 발주 물량 {{no_date_receipts}}개는 계산에 넣지 않았습니다.",
     "start_estimated": "현재 재고 {{start_stock}}개는 기준일 {{as_of_date}} 이후의 출고를 예측해 추정한 값입니다.",
     "p100_risk": "{{qty_p100}}개를 넣으면 다음 입고 때 {{ending_p100}}개가 남고 도착 후 품절 위험은 {{risk_basis}} "
                  "추정치로 {{risk_post_p100}}입니다(표본 {{risk_sample_size}}건).",
@@ -58,6 +60,7 @@ class Context:
     as_of_date: date | None = None
     method_fallback: bool = False   # 0002 3-3 methodFallback
     risk_basis: str = "SKU"         # 0002 3-8 riskBasis (SKU · POOLED)
+    no_date_receipt_qty: int = 0    # 0002 3-8 noDateReceiptQty
 
 
 @dataclass(frozen=True)
@@ -70,13 +73,17 @@ class Fallback:
         return " ".join(self.sentences)
 
 
+def _round(x: float) -> int:
+    """화면에 보이는 정수. 실제 규칙은 Spring 비교표를 따른다 (#4 문서 6-4). 여기서는 반올림."""
+    return math.floor(x + 0.5)
+
+
 def _int(x: float) -> str:
-    """개수는 천 단위 쉼표. 소수는 반올림한다: 화면 정수 표시 규칙이 정해지면 바꾼다 (#4 문서 7장 소수 표시)."""
-    return f"{math.floor(x + 0.5):,}"
+    return f"{_round(x):,}"
 
 
 def _pct(x: float) -> str:
-    return f"{math.floor(x * 100 + 0.5)}%"
+    return f"{_round(x * 100)}%"
 
 
 def _date(d: date) -> str:
@@ -84,6 +91,8 @@ def _date(d: date) -> str:
 
 
 def _cmp(a: float, b: float) -> str:
+    """방향은 화면에 보이는 값으로 비교한다 (#4 문서 6-4). 둘 다 6%로 보이면 '같습니다'."""
+    a, b = _round(a), _round(b)
     return "higher" if a > b else "lower" if a < b else "same"
 
 
@@ -106,6 +115,8 @@ def placeholder_values(r: ProductResult, ctx: Context) -> dict[str, str]:
             v[key] = _int(x)
     if r.multiplier is not None:
         v["multiplier"] = _pct(r.multiplier)
+    if ctx.no_date_receipt_qty > 0:
+        v["no_date_receipts"] = _int(ctx.no_date_receipt_qty)
     if ctx.as_of_date and r.start_stock_estimated:
         v["as_of_date"] = _date(ctx.as_of_date)
 
@@ -133,12 +144,12 @@ def placeholder_values(r: ProductResult, ctx: Context) -> dict[str, str]:
             _cmp(s.expected_ending_stock, base.expected_ending_stock)]
         if risk and s.post_arrival_risk is not None and base.post_arrival_risk is not None:
             v[f"dir_risk_post_{x}_connect"], v[f"dir_risk_post_{x}_end"] = DIR_RISK[
-                _cmp(s.post_arrival_risk, base.post_arrival_risk)]
+                _cmp(s.post_arrival_risk * 100, base.post_arrival_risk * 100)]
     return v
 
 
 def fallback_template(r: ProductResult, ctx: Context) -> list[str]:
-    """상태에 맞는 6장 조각을 표 순서대로 고른다. 조각 하나가 문장 하나다."""
+    """상태에 맞는 6장 조각을 번호 순서대로 고른다(6-2). 조각 하나가 문장 하나다."""
     if r.status in (ResultStatus.NOT_CALCULABLE, ResultStatus.EXCLUDED, ResultStatus.REUPLOAD_REQUIRED):
         return [PIECES[r.status]]
     if r.status == ResultStatus.NOT_NEEDED:
@@ -148,6 +159,8 @@ def fallback_template(r: ProductResult, ctx: Context) -> list[str]:
     t = [PIECES["basis"]]
     if ctx.method_fallback:
         t.append(PIECES["method_reason"])
+    if ctx.no_date_receipt_qty > 0:
+        t.append(PIECES["no_date"])
     if r.start_stock_estimated:
         t.append(PIECES["start_estimated"])
     t.append(PIECES["p100_risk" if risk else "p100"])

@@ -22,7 +22,8 @@ DOC_EXAMPLES = {"정상": "normal_duplicate", "확인 필요": "low_grade", "판
 def _load(case) -> tuple[ProductResult, Context]:
     c = case["context"]
     ctx = Context(as_of_date=date.fromisoformat(c["asOfDate"]) if c["asOfDate"] else None,
-                  method_fallback=c["methodFallback"], risk_basis=c["riskBasis"])
+                  method_fallback=c["methodFallback"], risk_basis=c["riskBasis"],
+                  no_date_receipt_qty=c["noDateReceiptQty"])
     return ProductResult.model_validate(case["result"]), ctx
 
 
@@ -47,9 +48,11 @@ def test_doc_examples_match_fixture():
 
 
 def test_pieces_are_doc_templates():
-    """조각은 6장 표의 template 칸과 같은 글이다 (`{{키}}` 표기만 다름)."""
-    section = DOC.split("## 6.")[1].split("### 상태별 예시 결과")[0]
-    doc = {re.sub(r"`(\{\{\w+\}\})`", r"\1", m) for m in re.findall(r"^\| [^|]+ \| (.+?) \| [^|]+ \|$", section, re.M)}
+    """조각은 6-2 표의 template 칸과 같은 글이고 조각 수도 같다 (`{{키}}` 표기만 다름)."""
+    section = DOC.split("### 6-2.")[1].split("### 6-3.")[0]
+    rows = re.findall(r"^\| \d+ \| [^|]+ \| (.+?) \| [^|]+ \|$", section, re.M)
+    doc = {re.sub(r"`(\{\{\w+\}\})`", r"\1", m) for m in rows}
+    assert len(rows) == len(PIECES)
     for piece in PIECES.values():
         assert piece in doc, piece
 
@@ -67,7 +70,8 @@ def test_keys_use_contract_names():
     """기본 문장의 자리 표시자 이름은 prompt가 LLM에 주는 이름과 같다 (0002 3-4, #4 문서 5장)."""
     keys = {k for piece in PIECES.values() for k in PLACEHOLDER_RE.findall(piece)}
     keys = {k.replace("_X", "_p80") for k in keys}
-    assert keys - set(KEY_DESCRIPTIONS) == {"reason"}  # 계산 불가 사유는 LLM에 보내지 않음 (LLM 미호출)
+    # 계산 불가 사유는 LLM을 부르지 않아 없음. no_date_receipts는 prompt 설명이 아직 없음 (#4 문서 7장)
+    assert keys - set(KEY_DESCRIPTIONS) == {"reason", "no_date_receipts"}
 
 
 @pytest.mark.parametrize("case", [c for c in CASES if c["expected"]], ids=lambda c: c["id"])
@@ -92,6 +96,15 @@ def test_method_reason_only_when_fallback():
     assert r.method_reason
     fb = build_fallback(r, Context(method_fallback=False))
     assert fb is not None and not any("이 산식을 쓴 이유" in s for s in fb.sentences)
+
+
+def test_direction_uses_shown_values():
+    """방향은 화면에 보이는 값으로 비교한다 (6-4): 잔여 19.6개와 20.4개는 둘 다 20개라 '같습니다'."""
+    r, ctx = _load(next(c for c in CASES if c["id"] == "insufficient_sample"))
+    p80 = r.scenarios[0].model_copy(update={"expected_ending_stock": 19.6})
+    p100 = r.scenarios[1].model_copy(update={"expected_ending_stock": 20.4})
+    v = placeholder_values(r.model_copy(update={"scenarios": [p80, p100, r.scenarios[2]]}), ctx)
+    assert (v["ending_p80"], v["ending_p100"], v["dir_ending_p80_end"]) == ("20", "20", "같습니다")
 
 
 def test_does_not_mutate_result():
