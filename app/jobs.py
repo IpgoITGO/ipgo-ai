@@ -1,7 +1,7 @@
 """SQS job/result envelope와 engine dispatch 계약."""
 from enum import StrEnum
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from app import repository, storage
 from engine import calculate as calculation
@@ -45,9 +45,11 @@ class ResultEnvelope(CamelModel):
 
 def execute(job: JobEnvelope) -> ResultEnvelope:
     if job.job_type is JobType.CLEAN:
-        request = CleanRequest.model_validate(job.payload)
-        sources = [(source, storage.read_source_file(source)) for source in request.files]
-        response = cleaning.clean(sources, repository.load_known_barcodes(request.user_id))
+        try:
+            request = CleanRequest.model_validate(job.payload)
+        except ValidationError as exc:
+            raise cleaning.CleaningInputError("정제 요청 형식이 올바르지 않아요") from exc
+        response = clean_request(request)
     elif job.job_type is JobType.CALCULATE:
         request = CalculateRequest.model_validate(job.payload)
         daily = repository.load_product_daily(request.warehouse_id, request.upload_file_ids)
@@ -62,3 +64,14 @@ def execute(job: JobEnvelope) -> ResultEnvelope:
         status=JobStatus.SUCCEEDED,
         result=response.to_json_dict(),
     )
+
+
+def clean_request(request: CleanRequest):
+    """HTTP와 worker가 공유하는 정제 조립 경로."""
+    source = request.files[0]
+    if request.upload_id != source.upload_file_id:
+        raise cleaning.CleaningInputError("업로드 식별자가 일치하지 않아요")
+    known, previous, period = repository.load_cleaning_context(
+        request.user_id, request.warehouse_id, request.upload_id, request.previous_upload_file_id, source)
+    content = storage.read_source_file(source)
+    return cleaning.clean([(source, content)], known, previous, period)

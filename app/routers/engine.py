@@ -1,12 +1,14 @@
 """계산 엔진 엔드포인트 (담당: 장준영). API 명세서 4장."""
 from fastapi import APIRouter
 
-from app import repository, storage
+from app import repository
 from app.config import get_settings
+from app.errors import AppError
+from app.jobs import clean_request
 from app.mocks import load_mock
 from engine import calculate as calc
-from engine import clean as cleaning
 from engine.backtest import run_backtest
+from engine.clean import CleaningInputError
 from schemas.engine import (
     BacktestRequest,
     BacktestResponse,
@@ -30,8 +32,10 @@ def clean(req: CleanRequest) -> CleanResponse:
     """DA-01 · DA-02 정제·검증."""
     if _mock_mode():
         return load_mock("clean", CleanResponse)
-    files = [(f, storage.read_source_file(f)) for f in req.files]
-    return cleaning.clean(files, repository.load_known_barcodes(req.user_id))
+    try:
+        return clean_request(req)
+    except CleaningInputError as exc:
+        raise AppError(422, "INVALID_SOURCE", str(exc)) from exc
 
 
 @router.post("/calculate", response_model=CalculateResponse, response_model_by_alias=True)
