@@ -8,6 +8,26 @@ on:
         required: false
         default: false
         type: boolean
+      real_capacity_approved:
+        description: "Approve real one-box only after measuring memory and capacity"
+        required: false
+        default: false
+        type: boolean
+      embedded_worker_enabled:
+        description: "Run a single worker inside the API task (real one-box only)"
+        required: false
+        default: false
+        type: boolean
+      llm_enabled:
+        description: "Inject the OpenAI secret for real insight calls"
+        required: false
+        default: false
+        type: boolean
+      llm_approved:
+        description: "Approve LLM use and its costs"
+        required: false
+        default: false
+        type: boolean
       engine_mode:
         description: "FastAPI engine mode (use mock until the real engine is ready)"
         required: true
@@ -50,19 +70,40 @@ jobs:
         env:
           MAINTENANCE_APPROVED: ${{ inputs.maintenance_approved }}
           ENGINE_MODE: ${{ inputs.engine_mode }}
+          REAL_CAPACITY_APPROVED: ${{ inputs.real_capacity_approved }}
+          EMBEDDED_WORKER_ENABLED: ${{ inputs.embedded_worker_enabled }}
+          LLM_ENABLED: ${{ inputs.llm_enabled }}
+          LLM_APPROVED: ${{ inputs.llm_approved }}
           API_DESIRED_COUNT: ${{ inputs.api_desired_count }}
           WORKER_DESIRED_COUNT: ${{ inputs.worker_desired_count }}
         shell: bash
         run: |
+          if [[ "$LLM_ENABLED" == true && ( "$ENGINE_MODE" != real || "$LLM_APPROVED" != true ) ]]; then
+            echo '::error::LLM requires real mode and separate LLM approval.'
+            exit 1
+          fi
+          if [[ "$ENGINE_MODE" == mock && "$EMBEDDED_WORKER_ENABLED" == true ]]; then
+            echo '::error::Mock mode cannot run an embedded worker.'
+            exit 1
+          fi
           case "$COMPUTE_MODE" in
-            ''|legacy) ;;
+            ''|legacy)
+              if [ "$EMBEDDED_WORKER_ENABLED" == true ]; then
+                echo '::error::Embedded worker is only supported on one-box.'
+                exit 1
+              fi
+              ;;
             onebox)
               if [ "$MAINTENANCE_APPROVED" != true ]; then
                 echo '::error::One-box deployment restarts this service. Review the image and approve maintenance first.'
                 exit 1
               fi
-              if [ "$ENGINE_MODE" != mock ] || [ "$WORKER_DESIRED_COUNT" != 0 ] || [ "$API_DESIRED_COUNT" -gt 1 ]; then
-                echo '::error::The validated one-box profile supports one mock API and zero workers. Validate real mode and capacity separately.'
+              if [ "$WORKER_DESIRED_COUNT" != 0 ] || [ "$API_DESIRED_COUNT" -gt 1 ]; then
+                echo '::error::One-box permits at most one API and zero separate workers.'
+                exit 1
+              fi
+              if [[ "$ENGINE_MODE" == real && ( "$REAL_CAPACITY_APPROVED" != true || "$API_DESIRED_COUNT" != 1 || "$EMBEDDED_WORKER_ENABLED" != true ) ]]; then
+                echo '::error::Real one-box requires measured capacity approval, one API and its embedded worker.'
                 exit 1
               fi
               ;;
@@ -75,6 +116,15 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           role-session-name: ipgo-ai-deploy
+      - name: Check separate worker is stopped
+        if: env.COMPUTE_MODE == 'onebox' && inputs.engine_mode == 'real'
+        run: |
+          counts="$(aws ecs describe-services --cluster ipgo-dev-cluster \
+            --services ipgo-dev-ai-worker --query 'services[0].[desiredCount,runningCount,pendingCount]' --output text)"
+          if [[ "$counts" != $'0\t0\t0' ]]; then
+            echo '::error::The separate worker service must exist and be fully stopped before real one-box deployment.'
+            exit 1
+          fi
       - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd
         id: login-ecr
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
@@ -103,18 +153,19 @@ jobs:
         env:
           ENGINE_MODE: ${{ inputs.engine_mode }}
           OPENAI_SECRET_ARN: ${{ vars.AWS_AI_OPENAI_SECRET_ARN }}
+          LLM_ENABLED: ${{ inputs.llm_enabled }}
         run: |
-          if [[ "$ENGINE_MODE" == "real" && -z "$OPENAI_SECRET_ARN" ]]; then
-            echo "AWS_AI_OPENAI_SECRET_ARN is required for real mode." >&2
+          if [[ "$LLM_ENABLED" == "true" && -z "$OPENAI_SECRET_ARN" ]]; then
+            echo "AWS_AI_OPENAI_SECRET_ARN is required when LLM is enabled." >&2
             exit 1
           fi
 
           jq \
-            --arg mode "$ENGINE_MODE" \
+            --arg llm_enabled "$LLM_ENABLED" \
             --arg openai_secret_arn "$OPENAI_SECRET_ARN" \
             '(.containerDefinitions[] | select(.name == "ai-api") | .secrets) |= (
               ((. // []) | map(select(.name != "OPENAI_API_KEY"))) +
-              (if $mode == "real" then
+              (if $llm_enabled == "true" then
                 [{"name": "OPENAI_API_KEY", "valueFrom": $openai_secret_arn}]
               else
                 []
@@ -134,12 +185,12 @@ jobs:
               | select(.name == "OPENAI_API_KEY")
             ] | length' "$RUNNER_TEMP/ai-api-task-definition.json"
           )"
-          if [[ "$ENGINE_MODE" == "mock" && "$openai_secret_count" != "0" ]]; then
-            echo "OPENAI_API_KEY must not be injected in mock mode." >&2
+          if [[ "$LLM_ENABLED" != "true" && "$openai_secret_count" != "0" ]]; then
+            echo "OPENAI_API_KEY must not be injected when LLM is disabled." >&2
             exit 1
           fi
-          if [[ "$ENGINE_MODE" == "real" && "$openai_secret_count" != "1" ]]; then
-            echo "OPENAI_API_KEY must be injected exactly once in real mode." >&2
+          if [[ "$LLM_ENABLED" == "true" && "$openai_secret_count" != "1" ]]; then
+            echo "OPENAI_API_KEY must be injected exactly once when LLM is enabled." >&2
             exit 1
           fi
       - name: Render API task definition
@@ -151,6 +202,7 @@ jobs:
           image: ${{ steps.login-ecr.outputs.registry }}/ipgo-dev/ai:${{ env.IMAGE_TAG }}
           environment-variables: |
             ENGINE_MODE=${{ inputs.engine_mode }}
+            IPGO_EMBEDDED_WORKER_ENABLED=${{ inputs.embedded_worker_enabled }}
       - name: Configure approved one-box restart
         if: env.COMPUTE_MODE == 'onebox'
         run: |
