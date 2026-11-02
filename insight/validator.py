@@ -11,6 +11,14 @@ PLACEHOLDER_RE = re.compile(r"\{\{([a-z][a-z0-9_.]*)\}\}")  # 명세는 { } (Ipg
 MIN_SENTENCES, MAX_SENTENCES = 2, 3  # #4 문서 3장. 참조 구현은 2~5 (7장)
 RISK_KEY_PREFIX = "risk_"  # 지금 문서 이름(risk_after.s100)과 0002 3-4 이름(risk_post_p100) 모두 risk_로 시작
 RISK_BASIS_KEY = "risk_basis"
+SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+# 시나리오 짝 검사 (#43). 0002 snake_case 이름에만 적용한다.
+# 문장의 주어 시나리오(label · qty · action · diff)와 같은 문장의 방향 · 값 키가 같은 시나리오여야 한다.
+# 예: 80% 문장에 120%의 방향 키를 쓰면 Spring이 값을 넣어도 "줄이면 재고는 늘지만"처럼 반대 문장이 됨
+SUBJECT_KEY_RE = re.compile(r"^(?:label|qty|action|diff)_(p80|p100|p120|custom)$")
+VALUE_KEY_RE = re.compile(r"^(?:depletion|ending|unmet|risk_post)_(p80|p100|p120|custom)$")
+DIRECTION_KEY_RE = re.compile(r"^dir_(?:ending|risk_post)_(p80|p120|custom)_(?:connect|end)$")
 
 DIGIT_RE = re.compile(r"[0-9０-９%％]")
 KOREAN_NUMERALS = [
@@ -41,7 +49,7 @@ MARKDOWN_PATTERNS = [r"^\s*[-*#>]", r"\*\*", r"`", r"\|"]
 
 @dataclass
 class Violation:
-    code: str  # raw_number | unknown_key | missing_key | banned_word | format
+    code: str  # raw_number | unknown_key | missing_key | scenario_mismatch | banned_word | format
     detail: str
 
 
@@ -62,6 +70,24 @@ def _first_match(patterns: list[str], s: str) -> re.Match | None:
     return next((m for p in patterns if (m := re.search(p, s))), None)
 
 
+def _scenario_mismatches(text: str) -> list[str]:
+    """문장마다 주어 시나리오에 속하지 않는 방향 · 값 키. 권장량(p100) 값은 비교 기준이라 늘 허용."""
+    bad = []
+    for sentence in SENTENCE_SPLIT.split(text.strip()):
+        keys = PLACEHOLDER_RE.findall(sentence)
+        subjects = {m[1] for k in keys if (m := SUBJECT_KEY_RE.match(k))}
+        for k in keys:
+            if m := DIRECTION_KEY_RE.match(k):
+                ok = m[1] in subjects                       # 방향은 주어 시나리오가 있어야 함
+            elif (m := VALUE_KEY_RE.match(k)) and subjects:
+                ok = m[1] in subjects or m[1] == "p100"
+            else:
+                continue
+            if not ok:
+                bad.append(k)
+    return bad
+
+
 def check_draft(text: str, allowed: Iterable[str], required: Iterable[str] = ()) -> CheckResult:
     """문장 초안을 검사한다. allowed는 쓸 수 있는 자리 표시자, required는 꼭 써야 하는 자리 표시자."""
     v: list[Violation] = []
@@ -75,6 +101,8 @@ def check_draft(text: str, allowed: Iterable[str], required: Iterable[str] = ())
 
     v += [Violation("unknown_key", f"목록에 없는 자리 표시자 {{{{{k}}}}}") for k in sorted(used - set(allowed))]
     v += [Violation("missing_key", f"필수 자리 표시자 {{{{{k}}}}} 누락") for k in required if k not in used]
+    v += [Violation("scenario_mismatch", f"문장의 시나리오와 짝이 맞지 않는 자리 표시자 {{{{{k}}}}}")
+          for k in _scenario_mismatches(text)]
 
     if hit := [w for w in DIRECTION_WORDS if w in body]:
         v.append(Violation("banned_word", f"방향 어휘 {hit[:4]}"))
@@ -87,7 +115,7 @@ def check_draft(text: str, allowed: Iterable[str], required: Iterable[str] = ())
 
     if "\n" in text or any(re.search(p, text, flags=re.M) for p in MARKDOWN_PATTERNS):
         v.append(Violation("format", "줄바꿈 · 마크다운"))
-    n = len([s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()])
+    n = len([s for s in SENTENCE_SPLIT.split(text.strip()) if s.strip()])
     if not MIN_SENTENCES <= n <= MAX_SENTENCES:
         v.append(Violation("format", f"문장 수 {n} (허용 {MIN_SENTENCES}~{MAX_SENTENCES})"))
     if "{" in body or "}" in body:
