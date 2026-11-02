@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.jobs import JobEnvelope, JobError, JobStatus, ResultEnvelope, execute
+from engine.calculate import CalculationInputError
 
 logger = logging.getLogger(__name__)
 running = True
@@ -31,6 +32,8 @@ def process_message(body: str) -> ResultEnvelope:
     job = JobEnvelope.model_validate_json(body)
     try:
         return execute(job)
+    except CalculationInputError as exception:
+        return _failure(job, "INVALID_INPUT", str(exception))
     except NotImplementedError:
         return _failure(job, "NOT_IMPLEMENTED", "아직 구현되지 않은 계산 기능이에요")
 
