@@ -9,6 +9,7 @@
 | 비밀값과 위험한 변경 기준 | [안전 규칙](rules/safety.md) |
 | 폴더 구조와 Spring 연동 | [구조와 연동](architecture.md) |
 | 연동 계약 결정 기록 | [decisions](decisions/) |
+| Server76 PostgreSQL 원본 조회와 적용 순서 | [DB 원본 계약](decisions/0005-database-original.md) |
 | AI 인사이트 prompt·자리 표시자·기본 문장 | [prompt 규칙과 기본 문장](ai-insight/prompt-and-fallback.md) |
 | AI 인사이트 LLM 모델 선정·측정 결과 | [LLM 모델 선정](ai-insight/llm-model-selection.md) |
 
