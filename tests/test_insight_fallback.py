@@ -98,13 +98,49 @@ def test_method_reason_only_when_fallback():
     assert fb is not None and not any("이 산식을 쓴 이유" in s for s in fb.sentences)
 
 
-def test_direction_uses_shown_values():
-    """방향은 화면에 보이는 값으로 비교한다 (6-4): 잔여 19.6개와 20.4개는 둘 다 20개라 '같습니다'."""
+@pytest.mark.parametrize(
+    ("ending_p80", "ending_p100", "shown_p80", "shown_p100", "direction"),
+    [(19.6, 20.4, "19", "20", "줄어듭니다"),
+     (19.1, 19.9, "19", "19", "같습니다"),
+     (20.4, 19.6, "20", "19", "늘어납니다")],
+)
+def test_direction_uses_shown_stock(ending_p80, ending_p100, shown_p80, shown_p100, direction):
+    """Spring 비교표처럼 재고를 내린 뒤 방향을 비교한다 (6-4, DisplayQuantities.stock)."""
     r, ctx = _load(next(c for c in CASES if c["id"] == "insufficient_sample"))
-    p80 = r.scenarios[0].model_copy(update={"expected_ending_stock": 19.6})
-    p100 = r.scenarios[1].model_copy(update={"expected_ending_stock": 20.4})
+    p80 = r.scenarios[0].model_copy(update={"expected_ending_stock": ending_p80})
+    p100 = r.scenarios[1].model_copy(update={"expected_ending_stock": ending_p100})
     v = placeholder_values(r.model_copy(update={"scenarios": [p80, p100, r.scenarios[2]]}), ctx)
-    assert (v["ending_p80"], v["ending_p100"], v["dir_ending_p80_end"]) == ("20", "20", "같습니다")
+    assert (v["ending_p80"], v["ending_p100"], v["dir_ending_p80_end"]) == (shown_p80, shown_p100, direction)
+
+
+def test_decimal_quantities_match_spring_display():
+    """시작 재고는 내림, 예상 출고량과 범위는 올림한다 (DisplayQuantities.stock/demand)."""
+    r, ctx = _load(next(c for c in CASES if c["id"] == "low_grade"))
+    r = r.model_copy(update={"start_stock_qty": 30.8, "forecast_outbound_qty": 96.1,
+                             "forecast_range_low": 70.1, "forecast_range_high": 125.1})
+    v = placeholder_values(r, ctx)
+    assert (v["start_stock"], v["forecast_outbound"], v["forecast_range_low"], v["forecast_range_high"]) == (
+        "30", "97", "71", "126")
+    fb = build_fallback(r, ctx)
+    assert fb is not None
+    assert "현재 재고 30개" in fb.text and "97개가 팔릴" in fb.text
+    assert "71~126개" in fb.text
+
+
+@pytest.mark.parametrize(
+    ("risk_p80", "risk_p100", "shown_p80", "shown_p100", "direction"),
+    [(0.056, 0.064, "6%", "6%", "같습니다"),
+     (0.054, 0.064, "5%", "6%", "낮아집니다"),
+     (0.066, 0.064, "7%", "6%", "높아집니다")],
+)
+def test_risk_direction_keeps_percent_rounding(risk_p80, risk_p100, shown_p80, shown_p100, direction):
+    """수량의 내림·올림을 비율에는 적용하지 않고 표시된 정수 %로 비교한다."""
+    r, ctx = _load(next(c for c in CASES if c["id"] == "pooled_estimated_custom"))
+    p80 = r.scenarios[0].model_copy(update={"post_arrival_risk": risk_p80})
+    p100 = r.scenarios[1].model_copy(update={"post_arrival_risk": risk_p100})
+    v = placeholder_values(r.model_copy(update={"scenarios": [p80, p100, *r.scenarios[2:]]}), ctx)
+    assert (v["risk_post_p80"], v["risk_post_p100"], v["dir_risk_post_p80_end"]) == (
+        shown_p80, shown_p100, direction)
 
 
 def test_does_not_mutate_result():

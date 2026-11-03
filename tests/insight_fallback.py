@@ -74,12 +74,22 @@ class Fallback:
 
 
 def _round(x: float) -> int:
-    """화면에 보이는 정수. 실제 규칙은 Spring 비교표를 따른다 (#4 문서 6-4). 여기서는 반올림."""
+    """비율 표시용 반올림. 수량은 Spring처럼 재고 내림·수요 올림으로 따로 처리한다."""
     return math.floor(x + 0.5)
 
 
-def _int(x: float) -> str:
-    return f"{_round(x):,}"
+def _int(x: int) -> str:
+    return f"{x:,}"
+
+
+def _stock(x: float) -> str:
+    """재고(개)는 내림: Spring DisplayQuantities.stock의 FLOOR."""
+    return _int(math.floor(x))
+
+
+def _demand(x: float) -> str:
+    """예상 출고량·범위(개)는 올림: Spring DisplayQuantities.demand의 CEILING."""
+    return _int(math.ceil(x))
 
 
 def _pct(x: float) -> str:
@@ -90,9 +100,8 @@ def _date(d: date) -> str:
     return f"{d.month}월 {d.day}일"
 
 
-def _cmp(a: float, b: float) -> str:
-    """방향은 화면에 보이는 값으로 비교한다 (#4 문서 6-4). 둘 다 6%로 보이면 '같습니다'."""
-    a, b = _round(a), _round(b)
+def _cmp(a: int, b: int) -> str:
+    """각 항목의 표시 규칙으로 변환한 정수를 비교한다 (#4 문서 6-4)."""
     return "higher" if a > b else "lower" if a < b else "same"
 
 
@@ -109,10 +118,13 @@ def placeholder_values(r: ProductResult, ctx: Context) -> dict[str, str]:
         v["method"], v["formula_desc"] = f"계산식 {r.method.value}", FORMULA_DESC[r.method]
     if ctx.method_fallback and r.method_reason:
         v["method_reason"] = r.method_reason.strip().rstrip(".")
-    for key, x in (("horizon_days", r.horizon_days), ("forecast_outbound", r.forecast_outbound_qty),
-                   ("start_stock", r.start_stock_qty), ("planned_receipts", r.planned_receipts_in_horizon)):
+    for key, x in (("horizon_days", r.horizon_days), ("planned_receipts", r.planned_receipts_in_horizon)):
         if x is not None:
             v[key] = _int(x)
+    if r.forecast_outbound_qty is not None:
+        v["forecast_outbound"] = _demand(r.forecast_outbound_qty)
+    if r.start_stock_qty is not None:
+        v["start_stock"] = _stock(r.start_stock_qty)
     if r.multiplier is not None:
         v["multiplier"] = _pct(r.multiplier)
     if ctx.no_date_receipt_qty > 0:
@@ -128,23 +140,24 @@ def placeholder_values(r: ProductResult, ctx: Context) -> dict[str, str]:
             v["risk_sample_size"] = _int(r.risk_sample_size)
         v["risk_basis"] = RISK_BASIS[ctx.risk_basis]
     if r.risk_status == RiskStatus.LOW_GRADE and r.forecast_range_low is not None and r.forecast_range_high is not None:
-        v["forecast_range_low"], v["forecast_range_high"] = _int(r.forecast_range_low), _int(r.forecast_range_high)
+        v["forecast_range_low"] = _demand(r.forecast_range_low)
+        v["forecast_range_high"] = _demand(r.forecast_range_high)
 
     described = [s for s in r.scenarios if not s.is_duplicate]
     base = next((s for s in described if s.type == ScenarioType.P100), None)
     for s in described:
         x = _key(s)
-        v[f"qty_{x}"], v[f"ending_{x}"] = _int(s.qty), _int(s.expected_ending_stock)
+        v[f"qty_{x}"], v[f"ending_{x}"] = _int(s.qty), _stock(s.expected_ending_stock)
         if risk and s.post_arrival_risk is not None:
             v[f"risk_post_{x}"] = _pct(s.post_arrival_risk)
         if base is None or s is base:
             continue
         v[f"action_{x}"] = ACTION[_cmp(s.qty, base.qty)]
         v[f"dir_ending_{x}_connect"], v[f"dir_ending_{x}_end"] = DIR_ENDING[
-            _cmp(s.expected_ending_stock, base.expected_ending_stock)]
+            _cmp(math.floor(s.expected_ending_stock), math.floor(base.expected_ending_stock))]
         if risk and s.post_arrival_risk is not None and base.post_arrival_risk is not None:
             v[f"dir_risk_post_{x}_connect"], v[f"dir_risk_post_{x}_end"] = DIR_RISK[
-                _cmp(s.post_arrival_risk * 100, base.post_arrival_risk * 100)]
+                _cmp(_round(s.post_arrival_risk * 100), _round(base.post_arrival_risk * 100))]
     return v
 
 
