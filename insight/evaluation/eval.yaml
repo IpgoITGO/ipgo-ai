@@ -1,0 +1,24 @@
+# CM-04 AI 인사이트 효과 평가 1단계 설정 (python -m insight.evaluation, #54)
+# 참조 구현 ai_insight v0.3 config/eval.yaml에서 1단계 절만 옮김. 2단계(adoption_rule · simulation · lock)는 #54 제외 범위.
+# LLM 모델 · 시간 초과는 서비스와 같은 .env 값을 쓴다 (같은 조건으로 평가).
+
+experiment:
+  n_sets: 3                       # 조건 수와 같아야 함 (조건마다 다른 시나리오 세트)
+  scenarios_per_set: 4
+  practice_trials: 1              # 연습 과제 (분석 제외)
+
+offline_gate:                     # 사람 실험 전에 통과해야 하는 자동 평가 관문
+  min_validation_pass_rate: 0.9   # LLM 호출 건 중 검사를 통과해 path=llm 이 된 비율
+  max_fill_mismatch: 0            # 최종 표시 문장 중 숫자 대조(number_check_ok) 실패 건수
+
+mock:
+  low_grade_rate: 0.0             # 가짜 결과 중 LOW_GRADE 비율. #54 확인 필요 (DA-13 전이라 근거 없음). 0보다 크면 범위 규칙이 없어 멈춤
+
+judge:                            # LLM 판사 — 문장 의미 채점 (참고 지표, 관문 아님)
+  model: gpt-5.6-sol              # #54. 환경변수 JUDGE_MODEL 이 우선
+  runs: 2                         # 같은 문장을 두 번 판정(두 번째는 기준 순서 반대). 모두 같을 때만 확정
+  max_tokens: 1200                # max_completion_tokens 로 보냄. gpt-5.6-sol 은 temperature 를 기본값(1)만 받아 보내지 않음 (#54 11/3 시험 호출)
+  timeout_sec: 60
+  scope: experiment               # experiment(실험 화면 고정 문장) | offline(1단계 반복 생성) | all
+  basis_keys: [forecast_outbound, multiplier, start_stock, planned_receipts, horizon_days]  # C4 '근거 수치'로 인정할 자리 표시자
+  advisory_min_pass_rate: 0.9     # 보고서에 표시만 하는 참고 기준
