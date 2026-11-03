@@ -181,7 +181,7 @@ def accuracy_for(product_id, valid_days, cases, setting, multiplier, method, hor
     history = []
     for case in selected:
         actual = replay(case, order_for(case, setting, multiplier), setting.lead_time_days)
-        history.append(AccuracyHistoryPoint(origin_date=case.sample.origin_date, 
+        history.append(AccuracyHistoryPoint(origin_date=case.sample.origin_date,
                                             forecast_qty=case.sample.forecast_qty,
                                             actual_qty=case.sample.actual_qty,
                                             covered=all(q > 0 for q in actual.closing)))
