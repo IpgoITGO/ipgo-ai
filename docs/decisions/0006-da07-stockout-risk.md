@@ -1,5 +1,8 @@
 # 0006. DA-07 표본 선택과 품절 위험 재적용
 
+후속: [0007](0007-da07-runtime-sampling.md)에서 실제 자료 조사 후 최소20건·주간 기준일을 고정하고
+HTTP/SQS 공급을 연결했다. 아래 미확정/미공급은 최초 내부 구현 시점 기록이다.
+
 - 상태: #36 내부 함수와 명시적 계산 연결 구현(2026-11-03). 최소 표본 정책 확정·서비스 활성화는 별도다.
 - 근거: [원본 요구사항 DA-07](https://drive.google.com/file/d/1S2EZtOlyg71APNqshlceZTj1xoewe8XJ/view),
   [기획서의 계산 규칙·품절 위험](https://drive.google.com/file/d/1oMbqZUBi9--81qUREgUYdBhTE_JL8S0D/view),

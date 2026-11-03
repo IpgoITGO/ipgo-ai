@@ -62,7 +62,7 @@ LLM에는 원본 수불부·원가·계정 정보·다른 SKU를 보내지 않�
 
 `status`와 화면 형식 값 dict는 InsightInput에 넣지 않는다. Spring은 `status=OK` 결과만 호출한다.
 계산 불가·입고 불필요·검산 제외·재업로드 필요는 FastAPI를 호출하지 않고 Spring이 처리한다.
-`riskStatus=null`인 현재 미구현을 임의 `INSUFFICIENT_SAMPLE`로 바꾸지 않는다. 실제 상태를 산출하기
+비활성·정책 결정일 이전 등 `riskStatus=null`인 미산출을 임의 `INSUFFICIENT_SAMPLE`로 바꾸지 않는다. 실제 상태를 산출하기
 전까지 입력을 만들지 않으며, 생성 보류/화면 처리는 실제 연결 작업에서 명시한다.
 
 기존 요청 호환을 위해 새 메타데이터는 `scenarios=[]`, bool3개=false를 기본으로 수용한다.
@@ -131,6 +131,7 @@ LLM 시간 초과·호출 오류·검사 탈락은 HTTP200 + FAILED/null draft�
 - AI44의 최종 화면 상태 이름·추가 실패 사유·문장 형태·연동 시험 날짜.
 - CUSTOM 입력 갱신과 문장 재생성 시점/범위.
 - AI53의 no_date_receipts 설명·정상 예시 ending_p80·필수 키표/버전 보강.
-- DA-07/백테스트/정확도 산출, 실제 계산31상품·실제 LLM/화면 전체 검증. #36 변환 구현과 구분한다.
+- DA-07의 실제 원장 업로드/업무 검증, 전체 백테스트/정확도·실제 LLM/화면 전체 검증.
+  DA07 내부 계산과 HTTP/SQS 공급은 [0007](0007-da07-runtime-sampling.md)을 따르며 #36 변환 구현과 구분한다.
 
 이번 계약/변환 검증을 DA-07 산출·Server 저장·LLM 활성화나 전체 업무 효과 완료로 보지 않는다.
