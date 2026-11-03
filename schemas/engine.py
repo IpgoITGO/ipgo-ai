@@ -222,7 +222,7 @@ class ProductResult(CamelModel):
     risk_status: RiskStatus | None = None
     risk_basis: RiskBasis | None = None     # DA-07 미산출은 SKU/POOLED로 추측하지 않는다.
     no_date_receipt_qty: int = Field(default=0, ge=0)
-    insight_input: InsightInput | None = None  # #36 별도 변환 구현 전 real 계산은 null 유지
+    insight_input: InsightInput | None = None  # #36 변환기: 위험/필수 사실 미산출은 null 유지
 
     # 정확도 (DA-13). 유효 관측일 7일 미만이면 grade 없이 NOT_CALCULABLE
     accuracy_grade: AccuracyGrade | None = None
