@@ -7,4 +7,4 @@ tests/test_engine_boundary.py가 이 규칙을 검사한다.
 
 # 계산 규칙이나 출력 형식이 바뀌면 올린다. Spring이 calculation_runs.engine_version에 저장한다.
 #   - 정책·계산식 변경: 0.x.0 올림  /  버그 수정: 0.0.x 올림
-ENGINE_VERSION = "0.4.0"
+ENGINE_VERSION = "0.5.0"

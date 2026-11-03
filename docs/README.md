@@ -11,6 +11,7 @@
 | 연동 계약 결정 기록 | [decisions](decisions/) |
 | DA-08 최소 시계열 오차 표본 | [입력·오차·제외·검증 범위](decisions/0005-da08-error-samples.md) |
 | DA-07 품절 위험 | [표본 선택·시나리오 재적용·미확정 정책](decisions/0006-da07-stockout-risk.md) |
+| DA-07 최소 기준·HTTP/SQS | [최소20건·주간 정책·원본 분석과 공급](decisions/0007-da07-runtime-sampling.md) |
 | AI 인사이트 prompt·자리 표시자·기본 문장 | [prompt 규칙과 기본 문장](ai-insight/prompt-and-fallback.md) |
 | AI 인사이트 LLM 모델 선정·측정 결과 | [LLM 모델 선정](ai-insight/llm-model-selection.md) |
 

@@ -4,11 +4,11 @@
 Spring Boot 백엔드가 이 서버를 호출하고, 계산 결과 저장은 백엔드가 합니다.
 
 기본 HTTP 실행은 mock입니다. `ENGINE_MODE=real`에서는 단일 XLSX 정제와 계산·직접 시나리오에
-실제 엔진을 연결합니다. 인사이트 입력 변환과 명시적 표본 정책의 내부 DA-07 위험 계산을 지원합니다.
-기존 HTTP/SQS 경로는 아직 표본 정책을 공급하지 않아 위험 미산출과 인사이트 입력 보류를 유지합니다.
+실제 엔진을 연결합니다. HTTP 계산·직접 입력 시나리오·SQS 계산은 동일 source의 DA08 표본으로
+DA-07 위험을 계산하고 인사이트 입력을 조립합니다. 2026년5~7월·주간 기준일·최소20건 정책을 고정했습니다.
 DA-08 최소 오차 표본 생성은 내부 함수로 지원하며 전체 백테스트 API/정책 선정은 아직 미완료입니다.
 `/engine/insight`의 LLM은 계산과 별도로 동작하며 사용할 때만 API key가 필요합니다.
-0.4.0의 전송 계약 추가를 실제 배포·Spring 저장·LLM 통합 완료로 보지 않습니다.
+real engineVersion은0.5.0입니다. mock 응답은 기존 계약의 정적 예시이며 실제 배포·Spring 저장·LLM 통합은 별도입니다.
 
 ## 실행
 
@@ -50,6 +50,7 @@ ruff check .                     # 코드 검사
 | `IPGO_UPLOAD_BUCKET` | AWS 환경에서 원본을 읽을 private S3 bucket | 없음 |
 | `IPGO_JOBS_QUEUE_URL` | 정제·계산·백테스트 job queue | 없음 |
 | `IPGO_RESULTS_QUEUE_URL` | 처리 결과를 Spring에 전달할 result queue | 없음 |
+| `IPGO_RISK_ENABLED` | 고정된 DA07 정책으로 표본 생성/위험 계산. false면 미산출 null | `true` |
 | `OPENAI_API_KEY` | `real` 모드의 AI 인사이트 LLM 호출에만 필요 | 없음 |
 | `OPENAI_MODEL` | AI 인사이트 LLM 모델 ([모델 선정](docs/ai-insight/llm-model-selection.md)) | `gpt-4o-mini` |
 | `LLM_TIMEOUT_SEC` | LLM 호출 한 번의 시간 제한(초). 넘으면 `LLM_TIMEOUT` | `10` |
@@ -75,11 +76,12 @@ ruff check .                     # 코드 검사
 422 `INVALID_INPUT`입니다. worker에서 발생한 `CalculationInputError`는 `FAILED/INVALID_INPUT`으로
 반환합니다. 일반 DB·네트워크 오류의 기존 재시도 방식은 유지합니다.
 
-이 단계의 `engineVersion`은 `0.4.0`입니다. 입고가 필요한 계산의 `expectedShortageOn`은 신규 입고 0개·기존 발주를 반영한 시뮬레이션에서
+이 단계의 `engineVersion`은 `0.5.0`입니다. 입고가 필요한 계산의 `expectedShortageOn`은 신규 입고 0개·기존 발주를 반영한 시뮬레이션에서
 커버 기간 안에 재고가 처음 0이 되는 날짜입니다. 기간 밖의 소진일을 임의로 추정하지 않습니다.
-기존 HTTP/SQS 경로는 DA-07 context를 아직 공급하지 않고 DA-13 정확도와 전체 백테스트도 미완료입니다.
-이 경로의 `riskStatus`, 위험도·표본 수·정확도 등급·
-평가 수치는 `null`이며 **품절 없음, 위험 0%, 평가 통과를 뜻하지 않습니다.** `validObservationDays`는
+HTTP/SQS는 고정 정책의 DA07 context를 공급합니다. 최소20건이면 SKU 또는 POOLED 위험을,
+실제 부족이면 INSUFFICIENT_SAMPLE을 반환합니다. 비활성 또는 정책 결정일 전의 요청은 미산출 null입니다.
+DA-13 정확도와 전체 백테스트는 미완료로 등급/평가 수치는 null입니다.
+**미산출 null은 품절 없음, 위험0%, 평가 통과를 뜻하지 않습니다.** `validObservationDays`는
 선택한 상품 기록 중 기준일까지의 유효 관측일 수입니다. 시나리오의 기간 내 소진일·미충족 수요는
 기존 DA-06 `simulate()`의 실제 계산 결과입니다.
 
@@ -98,6 +100,8 @@ DB 미설정은 계산 성공으로 대체하지 않습니다. DB 연결 제한�
   5,000개 및 상품×일 2,000개입니다. XLSX는 단일 파일이며 잘못된 원본은 `INVALID_SOURCE`입니다.
 - 상품별 `leadTimeDays + reviewCycleDays`는 최대 366일, `today - asOfDate`는 최대 730일,
   계산 요청의 세 시나리오 예상 결과는 총 10,000일 이내이며 DB 원본 조회는 50,000행 이내입니다. 초과하면 `INVALID_INPUT`입니다.
+- DA07 표본 예측 후보는 요청당 최대8,000개입니다. 조정 구간 SKU수×성숙한 기준일수×A/B2개를
+  D별 합산하며 초과하면 INVALID_INPUT입니다. 이 보호 한도와 통계적 최소20건은 다릅니다.
 - 한 Python 프로세스에서 정제·계산·시나리오·백테스트는 동시에 하나만 실행합니다. 사용 중인
   HTTP 요청은 503 `ENGINE_BUSY`, worker 메시지는 삭제하지 않고 재시도합니다. 이 잠금은 프로세스
   간 공유되지 않으므로 one-box에서는 API 프로세스 하나와 embedded worker 하나만 사용해야 합니다.
@@ -128,15 +132,16 @@ DB 조회만 대체합니다. 실제 업무 연동 완료나 배포 승인을 �
 - 기록 누락·무효 관측·중복·산식 사용 불가 등은 별도 제외 기록에 남기며, 데이터나 산식을 대체하지 않습니다.
   겹치는 평가 구간은 독립 표본 수로 간주하지 않습니다.
 - 이 함수는 내부 표본 생성만 담당합니다. 전체 `run_backtest`/HTTP·worker 응답, MAE/WAPE 집계,
-  정책 선정·정확도·DB 저장 연결은 후속입니다. 내부 DA-07에서 표본을 사용할 수 있지만
-  기존 HTTP/SQS real 계산/0.4.0 전송 응답은 변경하지 않습니다.
+  정책 선정·정확도·DB 저장 연결은 후속입니다. DA07 표본 생성은 HTTP/SQS의 공통 계산 경로에서 호출합니다.
 - 상세 입력과 검증 범위는 [DA-08 표본 계약](docs/decisions/0005-da08-error-samples.md)을 따릅니다.
 
 ## DA-07 품절 위험 (#36)
 
 `RiskContext`에 DA08 batch·5/1~7/31 조정 기간·최소 표본 수를 명시하고
 `calculate(..., risk_context=context)` 또는 `custom_scenario(..., risk_context=context)`에 전달합니다.
-원문에서 최소 표본 수는 미확정이므로 기본값을 넣지 않았으며 HTTP/SQS/DB 공급은 후속입니다.
+HTTP/SQS/직접 입력 경로는 이 context를 자동으로 준비합니다. source 소유권을 확인한 동일 DB 조회 결과를 쓰며
+추가 원본을 자동으로 가져오지 않습니다. 기본 정책은 app/risk_policy_2026.json에 최소20건·5/1~7/31·
+5/1부터7일 간격 기준일로 고정했고, 사용자 위임으로 결정한2026-11-03 이전 요청에 소급하지 않습니다.
 
 - 실제 사용한 산식과 D=g+H 길이가 같고 기준일까지 실적이 확정된 TUNE 표본만 사용합니다.
   SKU가 충분하면 SKU, 부족하면 대상 SKU를 포함한 전체 SKU를 사용하며 전체도 부족하면 INSUFFICIENT_SAMPLE입니다.
@@ -145,8 +150,14 @@ DB 조회만 대체합니다. 실제 업무 연동 완료나 배포 승인을 �
 - 유효 관측일7~13일은 LOW_GRADE로 모든 위험을 보류합니다. DA13 전체 등급/LOW 범위는 만들지 않습니다.
   모순·중복 표본은 오류이며 실제 부족과 구분합니다. 표본 수는 평가 사례 수이고 독립 표본 수가 아닙니다.
 - 수량·기본 시나리오의 재고/소진일은 그대로 두고 준비된 위험만 추가합니다. 실제 LLM은 호출하지 않습니다.
-  context가 없으면 기존 미산출 null을 유지합니다.
+  IPGO_RISK_ENABLED=false이거나 request.today가 정책 결정일 이전이면 미산출 null을 유지합니다.
+- 최소20건은 경험 빈도 분해능을5%p 이내로 두는 운영 문턱입니다. 주간 조정 표본으로 상품별 사례가
+  최대12개(D10)/9개(D34)인 이번 자료는 POOLED가 됩니다. 겹치는 창/상품 간 상관을 독립 표본으로 보지 않습니다.
+- 원본은 현재 업로더 격자 제한을 초과합니다. 별도 오프라인에서 조사한 결과를 실제 원장 업로드 성공으로
+  확대하지 않습니다. 2025년1월의 입고일 전 비영 기록도 이번에 수정하지 않았습니다.
+- 정책 파일은 image에 포함하고 SHA256을 검사합니다. 손상은 HTTP503/RISK_POLICY_INVALID이며 worker는 기존 재시도 경로를 따릅니다.
 - 식·출처·제외 규칙·사용 경계는 [DA-07 결정 기록](docs/decisions/0006-da07-stockout-risk.md)을 따릅니다.
+  현재 기준/연결·실제 자료 분석 한계는 [0007](docs/decisions/0007-da07-runtime-sampling.md)을 따릅니다.
 
 ## AI 인사이트 전송 계약 (#10)
 
@@ -164,8 +175,8 @@ DB 조회만 대체합니다. 실제 업무 연동 완료나 배포 승인을 �
   중복 시나리오를 제외하고 CUSTOM도 처리합니다. 방향은 비교표 표시 기준(재고 내림·위험 정수 %)으로 정합니다.
   `build_catalog`는 값이 있는 키 이름만 만들고 문구 키·실제 수치·상품 ID는 넣지 않습니다.
 - 계산 응답은 시나리오 조립 후 변환기를 호출합니다. OK가 아니거나 위험 상태·필수 사실이 없으면 `insightInput`은 null입니다.
-  기존 HTTP/SQS real 경로는 아직 DA-07 context를 공급하지 않아 `riskBasis`·`insightInput`을 null로 반환합니다.
-  내부 계산에 준비된 context를 명시하면 위험 산출 후 변환합니다.
+  HTTP/SQS real 경로는 DA-07 표본을 생성해 실제 위험 상태를 채운 뒤 변환합니다.
+  비활성/정책 결정일 이전·계산 불가·LOW 범위 미완성 등 필수 사실이 없으면 입력을 보류합니다.
   null을 표본 부족이나 SKU 위험으로 추측하지 않습니다. LOW_GRADE의 범위나 OK 위험/표본/기준이 빠져도 생성을 보류합니다.
 - mock calculate의 `insightInput`을 그대로 mock insight로 보낼 수 있습니다. 이는 전송 형식 검증용 합성 예시이며
   Spring 저장·유료 LLM 응답의 증거가 아닙니다. 변환 테스트는 기존 합성 결과를 재사용하고,

@@ -1,13 +1,13 @@
 """계산 엔진 엔드포인트 (담당: 장준영). API 명세서 4장."""
 from fastapi import APIRouter
 
+from app import calculation as calc
 from app import repository
 from app.config import get_settings
 from app.errors import AppError
 from app.execution import engine_slot, validate_calculation_capacity
 from app.jobs import clean_request
 from app.mocks import load_mock
-from engine import calculate as calc
 from engine.backtest import run_backtest
 from engine.clean import CleaningInputError
 from schemas.engine import (
