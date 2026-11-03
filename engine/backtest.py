@@ -131,10 +131,11 @@ def _actual(rows: pd.DataFrame, horizon_days: int) -> tuple[float | None, SkipRe
     return (total, None) if math.isfinite(total) else (None, SkipReason.INVALID_ACTUALS)
 
 
-def generate_error_samples(
+def _generate_error_samples(
     product_daily: pd.DataFrame, *, origins: Sequence[date], horizon_days: int,
     period: Period, period_name: SamplePeriod, observed_through: date,
     product_ids: Sequence[int] | None = None, methods: Sequence[Method] = (Method.A, Method.B),
+    _history_cache: dict | None = None,
 ) -> ErrorSampleBatch:
     """명시한 기준일별 A/B를 검증한다. 기본 정책·대체 산식·위험도를 선택하지 않는다.
 
@@ -180,14 +181,21 @@ def generate_error_samples(
                            horizon_days=horizon_days, target_end=end)
             reason = (SkipReason.OUTSIDE_PERIOD if origin < period.start or end > period.end else
                       SkipReason.NOT_OBSERVED_YET if end > observed_through else None)
-            history = sku[sku["stock_date"] <= origin].copy(deep=True)
+            history = None
             if reason is None:
-                if history["stock_date"].duplicated().any():
-                    reason = SkipReason.DUPLICATE_RECORDS
+                key = (product_id, origin, observed_through)
+                if _history_cache is not None and key in _history_cache:
+                    history, reason = _history_cache[key]
                 else:
-                    history = _quantities(history)
-                    if history is None:
-                        reason = SkipReason.INVALID_HISTORY
+                    history = sku[sku["stock_date"] <= origin].copy(deep=True)
+                    if history["stock_date"].duplicated().any():
+                        reason = SkipReason.DUPLICATE_RECORDS
+                    else:
+                        history = _quantities(history)
+                        if history is None:
+                            reason = SkipReason.INVALID_HISTORY
+                    if _history_cache is not None:
+                        _history_cache[key] = (history, reason)
             if reason is not None:
                 skipped.extend(SkippedSample(**context, method=m, reason=reason, detail=reason.value)
                                for m in selected_methods)
@@ -217,6 +225,45 @@ def generate_error_samples(
     return ErrorSampleBatch(phase, period.start, period.end, observed_through, tuple(samples), tuple(skipped))
 
 
+def generate_error_samples(
+    product_daily: pd.DataFrame, *, origins: Sequence[date], horizon_days: int,
+    period: Period, period_name: SamplePeriod, observed_through: date,
+    product_ids: Sequence[int] | None = None, methods: Sequence[Method] = (Method.A, Method.B),
+) -> ErrorSampleBatch:
+    """단일 기간의 원본 첫 시도 표본. 기준일 prefix·완전 실적·A/B 분리 규칙은 내부 생성기와 같다."""
+    return _generate_error_samples(product_daily, origins=origins, horizon_days=horizon_days, period=period,
+        period_name=period_name, observed_through=observed_through, product_ids=product_ids, methods=methods)
+
+
+def generate_error_sample_batches(product_daily: pd.DataFrame, plans: Sequence[dict]) -> tuple[ErrorSampleBatch, ...]:
+    """여러 H/D 평가에서 동일 SKU·기준일의 이력 검증만 재사용한다. 결과·산식·표본 개수는 동일하다.
+
+    캐시는 이 함수 안의 SKU 하나에만 존재하며 요청·상품 간 공유하거나 미래 이력을 전달하지 않는다.
+    한 SKU를 끝내면 폐기하므로 전체 원장의 모든 prefix를 동시에 보관하지 않는다.
+    """
+    from dataclasses import replace
+    if not isinstance(product_daily, pd.DataFrame) or not set(_COLUMNS) <= set(product_daily.columns):
+        raise BacktestInputError("필요한 상품 일별 열이 없어요")
+    # 독립 단일 생성과 같은 입력 검증을 먼저 수행한다. 빈 원본에도 기간 오류를 숨기지 않는다.
+    templates = [_generate_error_samples(product_daily.iloc[:0], **{**p, "product_ids": []}) for p in plans]
+    ids_by_plan = [_ids(p["product_ids"]) if p.get("product_ids") is not None
+                   else _ids(list(product_daily.product_id.unique())) for p in plans]
+    samples, skipped = [[] for _ in plans], [[] for _ in plans]
+    ids = sorted({p for group in ids_by_plan for p in group})
+    for product_id in ids:
+        sku = product_daily[product_daily.product_id == product_id]
+        history_cache = {}
+        for i, plan in enumerate(plans):
+            if product_id not in ids_by_plan[i]:
+                continue
+            batch = _generate_error_samples(sku, **{**plan, "product_ids": [product_id]},
+                                             _history_cache=history_cache)
+            samples[i].extend(batch.samples)
+            skipped[i].extend(batch.skipped)
+    return tuple(replace(t, samples=tuple(samples[i]), skipped=tuple(skipped[i])) for i, t in enumerate(templates))
+
+
 def run_backtest(request: BacktestRequest, product_daily: pd.DataFrame) -> BacktestResponse:
     """DA09/10/12/13을 포함한 전체 응답. 최소 표본 생성 성공으로 정책/등급을 채워 넣지 않는다."""
-    raise NotImplementedError("DA-08 run_backtest")
+    from engine.evaluation import evaluate
+    return evaluate(request, product_daily)

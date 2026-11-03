@@ -147,8 +147,8 @@ def test_unique_g_plus_h_lengths_are_prepared_once_and_shared_by_a_b():
         request.settings[0].model_copy(update={"product_id": 303, "review_cycle_days": 8}),
     ])
     ctx = prepare_risk_context(request, frame, policy())
-    assert {s.horizon_days for b in ctx.batches for s in b.samples + b.skipped} == {11, 12}
-    assert len(ctx.batches) == 2
+    assert {s.horizon_days for b in ctx.batches for s in b.samples + b.skipped} == {10, 11, 12}
+    assert len(ctx.batches) == 3
     assert {s.method for b in ctx.batches for s in b.samples + b.skipped} == {Method.A, Method.B}
 
 
@@ -164,7 +164,8 @@ def test_long_horizon_is_real_zero_available_samples_not_policy_missing():
 def test_work_limit_fails_explicitly_before_forecasting(monkeypatch):
     request, frame = case()
     monkeypatch.setattr(risk_sampling, "MAX_RISK_FORECASTS", 1)
-    monkeypatch.setattr(risk_sampling, "generate_error_samples", lambda *_a, **_kw: pytest.fail("용량 검사 전 예측"))
+    monkeypatch.setattr(risk_sampling, "generate_error_sample_batches",
+                        lambda *_a, **_kw: pytest.fail("용량 검사 전 예측"))
     with pytest.raises(CalculationInputError, match="지원 범위"):
         prepare_risk_context(request, frame, policy())
 

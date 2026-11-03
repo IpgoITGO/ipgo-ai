@@ -261,14 +261,16 @@ def test_calculate_context_fills_risk_and_facts_without_changing_baseline():
 
 
 @pytest.mark.parametrize("days", [7, 13])
-def test_low_observation_count_suppresses_all_risk_without_fabricating_grade_or_range(days):
+def test_low_observation_count_suppresses_risk_and_uses_da13_range(days):
     request, frame = calculation_case(days)
     result, = calculate(request, frame, risk_context=context(sample(), minimum=1)).results
     assert result.risk_status is RiskStatus.LOW_GRADE and result.risk_sample_size == 1
     assert result.risk_basis is None and result.pre_arrival_risk is None
     assert all(s.post_arrival_risk is None for s in result.scenarios)
-    assert result.accuracy_grade is result.forecast_range_low is result.forecast_range_high is None
-    assert result.insight_input is None  # DA13 LOW 범위가 준비되기 전에는 설명 입력을 만들지 않는다.
+    assert result.accuracy_grade.value == "LOW"
+    assert result.forecast_range_low is not None
+    assert result.forecast_range_low <= result.forecast_range_high
+    assert result.insight_input is not None  # LOW 범위가 준비되면 구조화 설명 입력을 만든다.
 
 
 def test_pooled_and_real_insufficiency_are_distinct_from_missing_configuration():

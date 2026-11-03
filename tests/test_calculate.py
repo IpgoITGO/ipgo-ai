@@ -90,7 +90,7 @@ def test_calculation_matches_da04_hand_calculations(case):
     elif result.expected_shortage_on is not None:
         assert request.today < result.expected_shortage_on <= request.today + timedelta(days=result.horizon_days)
     assert result.risk_status is None and result.pre_arrival_risk is None and result.risk_sample_size is None
-    assert result.accuracy_grade is None and result.cover_trial_count is None
+    assert result.accuracy_grade is not None and result.cover_trial_count is None
     pd.testing.assert_frame_equal(daily, original)
     assert request.model_dump() == snapshot
 
