@@ -3,7 +3,7 @@
 - 관련 Issue: #4
 - 관련 요구사항: AI-01, AI-02, AI-05, AI-06, DA-11
 - 입력 기준: 계산 엔진 계약 `schemas/engine.py`의 `ProductResult` (PR #6), 자리 표시자 이름과 엔진 결정은 [0002](../decisions/0002-insight-contract.md) 3-4 · 3-8
-- 버전: prompt `prompt-2026.10.21-v0.4`에 3장 "값 포함 시" · "작성 예시" 규칙 추가 (#32 측정 근거). 코드는 `insight/prompt.py`의 `PROMPT_VERSION = prompt-2026.11.02-v0.5` (#43), template 2차: 6장을 Spring 구현용으로 정리 (#14, #24)
+- 버전: prompt `prompt-2026.10.21-v0.4`에 3장 "값 포함 시" · "작성 예시" 규칙 추가 (#32 측정 근거). 코드는 `insight/prompt.py`의 `PROMPT_VERSION = prompt-2026.11.03-v0.6` (#43, #53: 3장 정상 · 판단 보류 예시에 잔여 재고 값, `no_date_receipts` 키 설명), template 2차: 6장을 Spring 구현용으로 정리 (#14, #24)
 
 계산 엔진(DA-11)이 만든 결과를 셀러가 빠르게 이해하도록 2~3문장으로 설명하는 규칙입니다. LLM은 숫자를 직접 쓰지 않고 자리 표시자만 씁니다. 실제 값은 나중에 채우고 대조합니다. LLM이 실패하거나 LLM을 쓰지 않는 경우에는 같은 자리 표시자를 쓰는 기본 문장을 보여 줍니다.
 
@@ -72,8 +72,8 @@ prompt에는 입력 상태에 맞는 예시 하나를 따르라고 적고 세 �
 
 | 상태 | 예시 |
 |---|---|
-| 정상 (위험 있음) | `{"sentences": ["{{method}} 기준 권장 입고량은 {{qty_p100}}개이며, 다음 입고 때 {{ending_p100}}개가 남고 도착 후 품절 위험은 {{risk_basis}} 추정치로 {{risk_post_p100}}입니다(표본 {{risk_sample_size}}건).", "{{label_p80}}인 {{qty_p80}}개로 {{action_p80}} 남는 재고는 {{dir_ending_p80_connect}} 품절 위험은 {{risk_post_p80}}로 {{dir_risk_post_p80_end}}.", "새 물량이 도착하기 전까지의 품절 위험은 수량과 관계없이 {{risk_pre}}입니다."]}` |
-| 판단 보류 | `{"sentences": ["{{method}} 기준 권장 입고량은 {{qty_p100}}개이며, 다음 입고 때 {{ending_p100}}개가 남습니다.", "{{label_p80}}인 {{qty_p80}}개로 {{action_p80}} 다음 입고 때 남는 재고는 {{dir_ending_p80_end}}.", "품절 위험은 과거 예측 표본이 부족해 산출하지 않았습니다."]}` |
+| 정상 (위험 있음) | `{"sentences": ["{{method}} 기준 권장 입고량은 {{qty_p100}}개이며, 다음 입고 때 {{ending_p100}}개가 남고 도착 후 품절 위험은 {{risk_basis}} 추정치로 {{risk_post_p100}}입니다(표본 {{risk_sample_size}}건).", "{{label_p80}}인 {{qty_p80}}개로 {{action_p80}} 다음 입고 때 남는 재고는 {{ending_p80}}개로 {{dir_ending_p80_connect}} 품절 위험은 {{risk_post_p80}}로 {{dir_risk_post_p80_end}}.", "새 물량이 도착하기 전까지의 품절 위험은 수량과 관계없이 {{risk_pre}}입니다."]}` |
+| 판단 보류 | `{"sentences": ["{{method}} 기준 권장 입고량은 {{qty_p100}}개이며, 다음 입고 때 {{ending_p100}}개가 남습니다.", "{{label_p80}}인 {{qty_p80}}개로 {{action_p80}} 다음 입고 때 남는 재고는 {{ending_p80}}개로 {{dir_ending_p80_end}}.", "품절 위험은 과거 예측 표본이 부족해 산출하지 않았습니다."]}` |
 | 확인 필요 (정확도 낮음) | `{"sentences": ["{{method}} 기준 권장 입고량은 {{qty_p100}}개이며, 다음 입고 때 {{ending_p100}}개가 남습니다.", "예측 기록이 짧아 품절 위험은 산출하지 않았고, 커버 기간 예상 출고량은 {{forecast_range_low}}~{{forecast_range_high}}개로 봅니다.", "{{label_p80}}인 {{qty_p80}}개로 {{action_p80}} 다음 입고 때 남는 재고는 {{dir_ending_p80_end}}."]}` |
 
 > 근거 (#32, 10/30, gpt-4o-mini · gpt-4o 각 15~18회): 참조 구현 prompt를 0002 이름으로만 옮기면 두 모델 모두 `[값]`을 그대로 옮겨 써 통과율 0%였습니다. "값 포함 시" 지시를 넣자 gpt-4o-mini 55.6%(정상 계열은 모두 통과, 판단 보류 · 확인 필요는 정상 예시를 따라 하다 실패), 상태별 예시를 나누자 100%였습니다. gpt-4o는 같은 prompt에서 46.7%로, 시나리오 명칭에 "80%"를 직접 쓰는 실패가 남았습니다.
@@ -151,8 +151,8 @@ prompt에는 입력 상태에 맞는 예시 하나를 따르라고 적고 세 �
 
 | `riskStatus` | 늘 있어야 하는 키 | 늘 있어야 하는 `directions` |
 |---|---|---|
-| `OK` | `qty_p100` · `ending_p100` · `risk_post_p100` · `risk_sample_size` · `risk_pre` · `method` · `qty_p80` · `risk_post_p80` | `ending_p80_vs_p100` · `risk_post_p80_vs_p100` |
-| `INSUFFICIENT_SAMPLE` | `qty_p100` · `ending_p100` · `method` · `qty_p80` | `ending_p80_vs_p100` |
+| `OK` | `qty_p100` · `ending_p100` · `risk_post_p100` · `risk_sample_size` · `risk_pre` · `method` · `qty_p80` · `ending_p80` · `risk_post_p80` | `ending_p80_vs_p100` · `risk_post_p80_vs_p100` |
+| `INSUFFICIENT_SAMPLE` | `qty_p100` · `ending_p100` · `method` · `qty_p80` · `ending_p80` | `ending_p80_vs_p100` |
 | `LOW_GRADE` | `qty_p100` · `ending_p100` · `method` · `qty_p80` · `forecast_range_low` · `forecast_range_high` | `ending_p80_vs_p100` |
 
 - `P80`이 권장량과 같아 중복(`isDuplicate = true`)이면 `p80` 키와 방향은 빠져도 됩니다. 이때 FastAPI는 "이번 목록에 없음" 안내를 붙입니다(3장 "키가 빠진 입력").
@@ -281,8 +281,6 @@ prompt에는 입력 상태에 맞는 예시 하나를 따르라고 적고 세 �
 
 | 항목 | 내용 | 다음 단계 |
 |---|---|---|
-| prompt에 `no_date_receipts` 설명 없음 | 엔진이 이 키를 보내면 LLM이 쓸 수 있지만 prompt의 키 설명 목록(`KEY_DESCRIPTIONS`)에 없음 | prompt를 바꾸면 `PROMPT_VERSION`을 올리고 다시 측정해야 해서, 효과 평가 1단계(CM-04)에서 함께 고침 |
-| 정상 예시의 잔여 재고 값 | 3장 정상 예시가 `{{dir_ending_p80_connect}}`를 쓰면서 `{{ending_p80}}`은 쓰지 않음. #44 실제 호출에서 "남는 재고는 늘지만"처럼 값이 빠진 문장이 나옴 | 위와 같이 효과 평가 1단계에서 고침 |
 | 팀 테스트 예시 키 | `tests/payloads.py`의 `INSIGHT_REQUEST`가 5-1 최소 키보다 적음 | #10에 제안 |
 
 ### 정해서 반영한 것
@@ -291,6 +289,7 @@ prompt에는 입력 상태에 맞는 예시 하나를 따르라고 적고 세 �
 - 도착 예정일 없는 발주: Spring이 `noDateReceipts`로 보냄(답변 4). 1장 확인 필요 조건과 6장 미반영 물량 조각에 반영했습니다.
 - 입력 계약: Spring이 `insightInput`을 저장해 그대로 보냄(답변 1). 스키마 반영은 #10입니다.
 - `NOT_NEEDED`에 직접 입력이 있어도 LLM을 부르지 않음(1장, 답변 5).
+- prompt 보강(#53, `prompt-2026.11.03-v0.6`): `KEY_DESCRIPTIONS`에 `no_date_receipts` 설명을 넣고, 3장 정상 · 판단 보류 예시가 `{{ending_p80}}`을 쓰게 했습니다(6장 기본 문장과 같은 "남는 재고는 {{ending_X}}개로" 형태). 5-1 표에 `ending_p80`을 더했습니다.
 - 문장 수: 2~3문장(`insight/validator.py`, #31). 참조 구현의 2~5문장은 쓰지 않습니다.
 - 금지 어휘 "낮춰요" · "올라가요": 검사 목록에 넣었습니다(#31).
 - 소수 표시: Spring 비교표 규칙(6-4).

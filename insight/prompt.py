@@ -14,7 +14,7 @@ from insight.validator import MAX_SENTENCES, MIN_SENTENCES, PLACEHOLDER_RE
 from schemas.base import RiskStatus
 from schemas.insight import InsightInput
 
-PROMPT_VERSION = "prompt-2026.11.02-v0.5"  # v0.4(참조 구현) + #32 측정 보강 (#4 문서 3장)
+PROMPT_VERSION = "prompt-2026.11.03-v0.6"  # v0.5 + 정상 · 판단 보류 예시 잔여 재고 값, no_date_receipts 설명 (#53)
 SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encoding="utf-8").rstrip("\n")
 
 SCENARIOS = ("p80", "p100", "p120", "custom")  # 계약 ScenarioType을 소문자로 (#4 문서 5장)
@@ -27,6 +27,7 @@ BASE_KEYS = {
     "horizon_days": "커버 기간(일) = 입고 주기 + 리드타임",
     "start_stock": "현재(기준일) 재고(개)",
     "planned_receipts": "커버 기간 안에 도착하는 기존 발주 물량(개)",
+    "no_date_receipts": "도착 예정일이 없어 계산에 넣지 않은 기존 발주 수량(개)",
     "method": "적용한 산식 이름",
     "formula_desc": "적용한 산식 설명",
     "method_reason": "이 산식을 쓴 이유(평가 결과 또는 A를 못 쓴 사유) — 근거 문장에 넣을 것",
