@@ -125,10 +125,16 @@ DB 조회만 대체합니다. 실제 업무 연동 완료나 배포 승인을 �
   실제 서비스는 사용한 prompt 버전, 모의 응답은 `mock`을 반환합니다. FastAPI 응답에 `mode`나 기본 문장은 넣지 않습니다.
 - 계산 요청의 `noDateReceipts: [{productId, quantity}]`는 설명용이며 해당 상품의 `noDateReceiptQty`로 합산합니다.
   양수 정수 수량만 받고 권장량·재고 시뮬레이션에는 넣지 않습니다. 도착일 있는 발주는 `plannedReceipts`로 분리합니다.
-- real 계산은 `methodFallback` 메타데이터를 제공하지만, 위험 산출·입력 변환 구현 전에는
-  `riskBasis`·`insightInput`을 null로 유지합니다. null을 표본 부족이나 SKU 위험으로 추측하지 않습니다.
+- `engine.insight_facts.to_insight_input(result, sku_label, as_of_date=...)`는 한 상품의 계산 결과를
+  이름 목록·비교 방향으로 바꿉니다(#36). 실제 상품명 대신 별칭을 넘기며, 시작 재고 추정 시 요청의 기준일도 필요합니다.
+  중복 시나리오를 제외하고 CUSTOM도 처리합니다. 방향은 비교표 표시 기준(재고 내림·위험 정수 %)으로 정합니다.
+  `build_catalog`는 값이 있는 키 이름만 만들고 문구 키·실제 수치·상품 ID는 넣지 않습니다.
+- 계산 응답은 시나리오 조립 후 변환기를 호출합니다. OK가 아니거나 위험 상태·필수 사실이 없으면 `insightInput`은 null입니다.
+  현재 real 계산은 DA-07 위험·정확도를 아직 산출하지 않아 `riskBasis`·`insightInput`을 계속 null로 반환합니다.
+  null을 표본 부족이나 SKU 위험으로 추측하지 않습니다. LOW_GRADE의 범위나 OK 위험/표본/기준이 빠져도 생성을 보류합니다.
 - mock calculate의 `insightInput`을 그대로 mock insight로 보낼 수 있습니다. 이는 전송 형식 검증용 합성 예시이며
-  실제 변환 함수·Spring 저장·유료 LLM 응답의 증거가 아닙니다. `to_insight_input()` 구현은 #36의 별도 작업입니다.
+  Spring 저장·유료 LLM 응답의 증거가 아닙니다. 변환 테스트는 기존 합성 결과를 재사용하고,
+  HTTP 연결 검증은 가짜 상류 위험 상태와 FakeClient를 씁니다. 실제 위험 산출·유료 LLM·업무 전체 흐름 검증과 구분합니다.
 
 ## AWS 데이터 접근 계약
 
