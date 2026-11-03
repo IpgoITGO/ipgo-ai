@@ -5,6 +5,7 @@ import pandas as pd
 
 from engine import ENGINE_VERSION
 from engine.forecast import forecast_a, forecast_b
+from engine.insight_facts import to_insight_input
 from engine.replenish import required_qty, round_to_order_unit, split_forecast, split_planned_receipts, start_stock
 from engine.scenario import simulate
 from schemas.base import Method, ResultStatus, ScenarioType
@@ -157,6 +158,7 @@ def calculate(request: CalculateRequest, product_daily: pd.DataFrame) -> Calcula
                     result, config, request.today, planned, qty, kind,
                     duplicate=kind is not ScenarioType.P100 and qty == result.recommended_qty,
                 ))
+        result.insight_input = to_insight_input(result, "이 상품", as_of_date=request.as_of_date)
         results.append(result)
     return CalculateResponse(engine_version=ENGINE_VERSION, results=results)
 
