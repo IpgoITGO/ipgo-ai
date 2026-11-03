@@ -6,6 +6,7 @@
 - 값 넣기 · 숫자 대조 · 기본 문장은 Spring 대신 #44 기준 구현(tests/insight_fallback.py)을 쓴다.
 """
 
+import math
 import re
 from datetime import date
 
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 from schemas.base import Method, ResultStatus, RiskStatus, ScenarioType
 from schemas.engine import ProductResult
 from schemas.insight import InsightInput
-from tests.insight_fallback import Context, _date, _int, _round, placeholder_values
+from tests.insight_fallback import Context, _date, _demand, _int, _round, placeholder_values
 
 PHRASE_RE = re.compile(
     r"^(label|action|dir)_|^(formula_desc|risk_basis|reason)$"
@@ -125,14 +126,14 @@ def all_values(case: EvalCase) -> dict[str, str]:
         v[f"depletion_{x}"] = (
             _date(s.expected_depletion_on) if s.expected_depletion_on else "커버 기간 안에 소진되지 않음"
         )
-        v[f"unmet_{x}"] = _int(s.unmet_demand_qty)
+        v[f"unmet_{x}"] = _demand(s.unmet_demand_qty)  # 서버 DisplayQuantities.demand (미충족 수요 올림)
         if base is not None and s is not base:
             v[f"diff_{x}"] = _int(abs(s.qty - base.qty))
     return v
 
 
-def _dir(a: float, b: float) -> str:
-    a, b = _round(a), _round(b)
+def _dir(a: int, b: int) -> str:
+    """표시 규칙으로 바꾼 정수끼리 비교 (#4 문서 6-4, tests/insight_fallback._cmp와 같음)."""
     return "높음" if a > b else "낮음" if a < b else "같음"
 
 
@@ -146,9 +147,11 @@ def to_input(case: EvalCase) -> InsightInput:
         if s.is_duplicate or s is base or base is None:
             continue
         x = s.type.value.lower()
-        dirs[f"ending_{x}_vs_p100"] = _dir(s.expected_ending_stock, base.expected_ending_stock)
+        dirs[f"ending_{x}_vs_p100"] = _dir(math.floor(s.expected_ending_stock), math.floor(base.expected_ending_stock))
         if r.risk_status == RiskStatus.OK and s.post_arrival_risk is not None and base.post_arrival_risk is not None:
-            dirs[f"risk_post_{x}_vs_p100"] = _dir(s.post_arrival_risk * 100, base.post_arrival_risk * 100)
+            dirs[f"risk_post_{x}_vs_p100"] = _dir(
+                _round(s.post_arrival_risk * 100), _round(base.post_arrival_risk * 100)
+            )
     return InsightInput(
         sku_label="(이 상품)",
         recommended=ScenarioType.P100,

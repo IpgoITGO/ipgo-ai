@@ -12,6 +12,7 @@ prepare   : 결과마다 고정 문장 · AI 작성 문장을 만들고 이해�
 """
 
 import json
+import math
 import statistics
 from collections import Counter
 from dataclasses import asdict, dataclass, field
@@ -158,7 +159,7 @@ def experiment_candidate(c: EvalCase) -> tuple[bool, str]:
 
 
 def _difficulty(c: EvalCase) -> tuple:
-    n_out = sum(1 for k in EXPERIMENT_KEYS if round(c.scenario(k).expected_ending_stock) == 0)
+    n_out = sum(1 for k in EXPERIMENT_KEYS if math.floor(c.scenario(k).expected_ending_stock) == 0)
     return (n_out, c.result.method.value, bool(c.result.planned_receipts_in_horizon))
 
 

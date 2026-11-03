@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from insight.evaluation.bank import experiment_candidate, for_experiment, make_bank, prepare
-from insight.evaluation.cases import EvalCase, from_reference, to_input, verify_filled
+from insight.evaluation.cases import EvalCase, all_values, from_reference, to_input, verify_filled
 from insight.evaluation.config import load_config
 from insight.evaluation.mock_engine import mock_bank
 from insight.evaluation.quiz import make_questions
@@ -127,6 +127,24 @@ def test_from_reference_maps_duplicate_and_pending():
     assert c.result.planned_receipts_in_horizon == 12 and c.no_date_receipt_qty == 3
     assert c.scenario(ScenarioType.P80).is_duplicate and not c.method_fallback
 
+
+
+def test_display_rules_follow_server(normal):
+    """소수 재고 · 수요는 서버 DisplayQuantities와 같게 보인다 (#49 f80e67b).
+
+    재고 내림, 예상 출고량 · 미충족 수요 올림.
+    """
+    r = normal.result
+    p80, p100 = r.scenarios[0], r.scenarios[1]
+    frac = normal.model_copy(update={"result": r.model_copy(update={
+        "forecast_outbound_qty": 409.2, "start_stock_qty": 120.9,
+        "scenarios": [p80.model_copy(update={"expected_ending_stock": 19.9, "unmet_demand_qty": 0.2}),
+                      p100.model_copy(update={"expected_ending_stock": 19.1})] + r.scenarios[2:]})})
+    facts = dict(render_table(for_experiment(frac))["facts"])
+    assert facts["커버 기간 예상 출고"] == "410개" and facts["현재 재고"] == "120개"
+    v = all_values(frac)
+    assert v["ending_p80"] == "19" and v["unmet_p80"] == "1"
+    assert to_input(frac).directions["ending_p80_vs_p100"] == "같음"  # 둘 다 19개로 보임
 
 # --- 실험 대상 선정 (참조 구현 test_candidate_rules · test_table_matches_engine_values) -----------
 

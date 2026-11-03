@@ -9,11 +9,12 @@
 """
 
 import hashlib
+import math
 import random
 from dataclasses import asdict, dataclass
 
 from schemas.base import RiskStatus, ScenarioType
-from tests.insight_fallback import _int, _pct, _round
+from tests.insight_fallback import _int, _pct
 
 from .cases import EvalCase
 
@@ -32,7 +33,7 @@ class Question:
         return d
 
 
-def _q(n: float) -> str:
+def _q(n: int) -> str:
     return f"{_int(n)}개"
 
 
@@ -53,8 +54,8 @@ def make_questions(case: EvalCase) -> list[Question]:
     assert r.forecast_outbound_qty is not None and r.recommended_qty and s80 and s100 and s120, (
         "실험용 결과는 정상 상태와 80% · 100% · 120% 시나리오가 필요합니다"
     )
-    cid, cur = case.id, r.start_stock_qty
-    demand = _round(r.forecast_outbound_qty)
+    cid, cur = case.id, math.floor(r.start_stock_qty)  # 표에 보이는 값 (재고 내림, 서버 DisplayQuantities)
+    demand = math.ceil(r.forecast_outbound_qty)  # 표에 보이는 값 (예상 출고량 올림)
     qs: list[Question] = []
 
     qs.append(
@@ -64,17 +65,17 @@ def make_questions(case: EvalCase) -> list[Question]:
             "권장 입고량을 계산할 때 쓴 커버 기간 예상 출고량은 몇 개인가요?",
             _q(demand),
             [
-                _q(r.forecast_outbound_qty * r.multiplier),
+                _q(round(r.forecast_outbound_qty * r.multiplier)),
                 _q(r.recommended_qty),
                 _q(cur),
                 _q(demand + cur),
-                _q(demand * 0.8),
+                _q(round(demand * 0.8)),
             ],
             f"{cid}q1",
         )
     )
 
-    e100, e120 = _round(s100.expected_ending_stock), _round(s120.expected_ending_stock)
+    e100, e120 = math.floor(s100.expected_ending_stock), math.floor(s120.expected_ending_stock)  # 표에 보이는 값
     diff = e120 - e100
     correct = "변하지 않는다" if diff == 0 else f"{_q(abs(diff))} {'늘어난다' if diff > 0 else '줄어든다'}"
     qd = s120.qty - s100.qty
@@ -99,7 +100,7 @@ def make_questions(case: EvalCase) -> list[Question]:
         )
     )
 
-    out = [lbl for lbl, s in (("80%", s80), ("100%", s100), ("120%", s120)) if _round(s.expected_ending_stock) == 0]
+    out = [lbl for lbl, s in (("80%", s80), ("100%", s100), ("120%", s120)) if math.floor(s.expected_ending_stock) == 0]
     choices = ["없음", "80%만", "80%, 100%", "80%, 100%, 120% 모두"]
     key = {0: "없음", 1: "80%만", 2: "80%, 100%", 3: "80%, 100%, 120% 모두"}[len(out)]
     if out and out[0] != "80%":  # 단조성이 깨진 특이 사례
