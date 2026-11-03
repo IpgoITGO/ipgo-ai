@@ -5,14 +5,14 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from engine.backtest import BacktestInputError, SamplePeriod, generate_error_samples
+from engine.backtest import BacktestInputError, SamplePeriod, generate_error_sample_batches
 from engine.calculate import CalculationInputError, _inputs
 from engine.risk import RiskContext
 from engine.scenario import RiskInputError
 from schemas.engine import CalculateRequest, Period
 
 # 현재 서비스의 요청당 계산 보호 한도다. 통계적 최소 표본 수가 아니다.
-MAX_RISK_FORECASTS = 8_000
+MAX_RISK_FORECASTS = 16_000
 
 
 @dataclass(frozen=True)
@@ -47,8 +47,9 @@ def prepare_risk_context(
     if request.today < policy.available_on:
         return None
     gap = (request.today - request.as_of_date).days
-    horizons = sorted({gap + settings[p].lead_time_days + settings[p].review_cycle_days
-                       for p in ids if p in settings})
+    # DA13 커버 실적은 H, DA07 위험/LOW 범위는 D=g+H. 같은 H는 한 번만 생성한다.
+    horizons = sorted({extra + settings[p].lead_time_days + settings[p].review_cycle_days
+                       for p in ids if p in settings for extra in {0, gap}})
     cutoff = min(request.as_of_date, policy.period_end)
     # 조정 구간에 실적 행이 전혀 없는 작년 전용 SKU는 유효 비율을 만들 수 없다.
     # productIds로 pool을 줄이지 않으며, 기준일 이후 처음 나타난 상품도 넣지 않는다.
@@ -65,17 +66,12 @@ def prepare_risk_context(
     calls = len(tune_ids) * 2 * sum(len(origins) for origins in origins_by_horizon.values())
     if calls > MAX_RISK_FORECASTS:
         raise CalculationInputError("위험 표본 생성의 요청당 계산 지원 범위를 초과했어요")
-    batches = []
     try:
-        for horizon, origins in origins_by_horizon.items():
-            if not origins or not tune_ids:
-                continue
-            batches.append(generate_error_samples(
-                daily, origins=origins, horizon_days=horizon,
-                period=Period(start=policy.period_start, end=policy.period_end),
-                period_name=SamplePeriod.TUNE, observed_through=request.as_of_date,
-                product_ids=tune_ids,
-            ))
+        plans = [dict(origins=origins, horizon_days=horizon,
+                      period=Period(start=policy.period_start, end=policy.period_end),
+                      period_name=SamplePeriod.TUNE, observed_through=request.as_of_date, product_ids=tune_ids)
+                 for horizon, origins in origins_by_horizon.items() if origins and tune_ids]
+        batches = generate_error_sample_batches(daily, plans)
     except (BacktestInputError, RiskInputError) as exc:
         raise CalculationInputError("위험 표본의 원본·기간·산식 입력을 확인해 주세요") from exc
     return RiskContext(tuple(batches), policy.period_start, policy.period_end, policy.min_samples)

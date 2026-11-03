@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from engine import ENGINE_VERSION
+from engine.accuracy import empirical_range, grade
 from engine.forecast import forecast_a, forecast_b
 from engine.insight_facts import to_insight_input
 from engine.replenish import required_qty, round_to_order_unit, split_forecast, split_planned_receipts, start_stock
@@ -119,7 +120,7 @@ def _product(
         horizon_days=horizon, forecast_outbound_qty=cover, start_stock_qty=stock, start_stock_estimated=gap > 0,
         planned_receipts_in_horizon=planned_qty, pre_arrival_unmet_qty=baseline.pre_arrival_unmet,
         required_qty_before_rounding=need, recommended_qty=qty, recommended_amount=qty * settings.unit_cost,
-        valid_observation_days=valid_days, expected_shortage_on=shortage,
+        valid_observation_days=valid_days, accuracy_grade=grade(valid_days, None), expected_shortage_on=shortage,
     ), planned
 
 
@@ -185,12 +186,42 @@ def _apply_risk(
     result.risk_basis = selection.basis
 
 
+def _apply_accuracy(result, request, settings, context, indexed):
+    """동일 산식·H의 확정 TUNE 커버 실적과 D 비율의 LOW 범위를 연결한다(개·비율)."""
+    if result.status not in (ResultStatus.OK, ResultStatus.NOT_NEEDED) or context is None:
+        return
+    from engine.evaluation import accuracy_for, case_from_sample
+    samples = [s for b in context.batches for s in b.samples
+               if s.product_id == result.product_id and s.method == result.method
+               and s.horizon_days == result.horizon_days and s.target_end <= request.as_of_date]
+    cases = [case for s in samples if (case := case_from_sample(s, indexed)) is not None]
+    accuracy = accuracy_for(result.product_id, result.valid_observation_days, cases, settings,
+                            request.policy.multiplier, result.method, result.horizon_days, context,
+                            request.as_of_date)
+    result.accuracy_grade = accuracy.grade
+    result.cover_success_count = accuracy.cover_success_count
+    result.cover_trial_count = accuracy.cover_trial_count
+    result.forecast_error_rate = accuracy.forecast_error_rate
+    if result.accuracy_grade is not None and result.accuracy_grade.value == "LOW":
+        selection = select_risk_samples(context, product_id=result.product_id, method=result.method,
+            horizon_days=(request.today-request.as_of_date).days + result.horizon_days,
+            observed_through=request.as_of_date)
+        if selection.basis is not None:
+            result.forecast_range_low, result.forecast_range_high = empirical_range(
+                result.forecast_outbound_qty, selection.ratios)
+
+
 def calculate(
     request: CalculateRequest, product_daily: pd.DataFrame, *, risk_context: RiskContext | None = None,
 ) -> CalculateResponse:
     """D=g+H일 예측에서 H일 필요량(개)을 구하고, 권장량의 80/100/120%를 입고 단위로 올려 비교한다."""
     settings, daily, ids = _inputs(request, product_daily)
     results = []
+    indexed = {}
+    if risk_context is not None:
+        from engine.evaluation import index_daily
+        indexed = index_daily(daily[(daily.stock_date >= risk_context.period_start)
+                                    & (daily.stock_date <= min(request.as_of_date, risk_context.period_end))])
     for product_id in ids:
         config = settings.get(product_id)
         result, planned = _product(request, daily, product_id, config)
@@ -202,6 +233,7 @@ def calculate(
                     result, config, request.today, planned, qty, kind,
                     duplicate=kind is not ScenarioType.P100 and qty == result.recommended_qty,
                 ))
+        _apply_accuracy(result, request, config, risk_context, indexed)
         _apply_risk(result, request, daily, config, planned, risk_context)
         result.insight_input = to_insight_input(result, "이 상품", as_of_date=request.as_of_date)
         results.append(result)
