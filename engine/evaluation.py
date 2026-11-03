@@ -91,8 +91,8 @@ def case_from_sample(sample, indexed):
                 row.opening_qty, row.inbound_qty, row.outbound_qty, row.adjustment_qty, row.closing_qty))
             if (not all(math.isfinite(q) for q in (opening, inc, out, adj, closing))
                     or min(opening, inc, out, closing) < 0
-                    or not math.isclose(opening, prior, abs_tol=1e-9)
-                    or not math.isclose(opening + inc - out + adj, closing, abs_tol=1e-9)
+                    or not math.isclose(opening, prior, rel_tol=0, abs_tol=1e-9)
+                    or not math.isclose(opening + inc - out + adj, closing, rel_tol=0, abs_tol=1e-9)
                     or out > opening + inc):
                 return None
             demand.append(out)
@@ -244,8 +244,9 @@ def _evaluate(request, daily):
         raise BacktestInputError("백테스트 요청당 계산 지원 범위 초과")
     batches = generate_error_sample_batches(daily, [dict(origins=o, horizon_days=h, period=p, period_name=phase,
         observed_through=test.end, product_ids=sorted(daily.product_id.unique())) for phase, p, h, o in plans])
-    samples = [s for b in batches for s in b.samples if
-               s.horizon_days == settings[s.product_id].lead_time_days + settings[s.product_id].review_cycle_days]
+    # 설정된 SKU만 정책·실적 평가 대상으로 삼고, 전체 source batch는 위험 pool에 보존한다.
+    samples = [s for b in batches for s in b.samples if s.product_id in settings
+               and s.horizon_days == settings[s.product_id].lead_time_days + settings[s.product_id].review_cycle_days]
     tune_samples = [s for s in samples if s.period == SamplePeriod.TUNE]
     test_samples = [s for s in samples if s.period == SamplePeriod.TEST]
     method, reason = choose_method(tune_samples)

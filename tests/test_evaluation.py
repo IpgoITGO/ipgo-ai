@@ -220,3 +220,31 @@ def test_repository_capacity_rejects_before_building_dataframe_and_rolls_back(mo
     with pytest.raises(CalculationInputError):
         repository.load_product_daily(1,[1],user_id=1)
     assert connection.read_only and connection.rolled_back
+
+
+def test_partial_settings_can_use_other_source_skus_as_risk_pool(client, monkeypatch):
+    # 설정은 평가 대상만 지정한다. 다른 원본 SKU는 동일 조건의 위험 pool로 남는다.
+    req, daily = request((1,)), dataset((1,2))
+    response = run_backtest(req, daily)
+    assert {a.product_id for a in response.sku_accuracy} == {1}
+    assert {a.product_id for a in response.actual_inbound_comparison} == {1}
+    assert sum(b.cases for b in response.scenario_reliability.risk_buckets) > 0
+    monkeypatch.setenv("ENGINE_MODE", "real")
+    monkeypatch.setattr("app.repository.load_product_daily", lambda *_a, **_k: daily)
+    http = client.post("/engine/backtest", json=req.to_json_dict())
+    job = dict(contractVersion="1", jobId="partial", jobType="BACKTEST", payload=req.to_json_dict())
+    assert http.status_code == 200
+    assert http.json() == process_message(json.dumps(job)).result == response.to_json_dict()
+
+
+def test_large_stock_does_not_hide_a_broken_balance_identity():
+    from engine.evaluation import case_from_sample, index_daily
+    daily = dataset()
+    daily[['opening_qty','closing_qty']] *= 10**12
+    batch = generate_error_samples(daily, origins=[date(2026,5,1)], horizon_days=10,
+        period=request().tune_period, period_name='TUNE', observed_through=date(2026,7,31))
+    sample = batch.samples[0]
+    assert case_from_sample(sample, index_daily(daily)) is not None
+    broken = daily.copy()
+    broken.loc[broken.stock_date==date(2026,5,2),'opening_qty'] += 1
+    assert case_from_sample(sample, index_daily(broken)) is None
