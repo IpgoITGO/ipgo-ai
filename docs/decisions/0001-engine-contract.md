@@ -19,7 +19,7 @@
 | 11 | mock 응답 | `ENGINE_MODE=mock`이면 명세 예시 반환 | 백엔드가 엔진 구현을 기다리지 않음 |
 | 12 | 브랜치 · 의존성 · CI | 저장소 규칙(`feature/<issue>-*` → `dev`), `requirements/` 분리와 버전 고정, PR마다 ruff · pytest | 새 환경에서도 같은 결과 |
 | 13 | 계산 불가 이유 | `NOT_CALCULABLE` · `EXCLUDED` · `REUPLOAD_REQUIRED`면 `reason` 필수. 없으면 스키마가 거부 | 0개로 바꾸지 않는 규칙을 코드로 보장 (`REUPLOAD_REQUIRED` 포함 여부는 백엔드 확인) |
-| 14 | DB 소유권 | Spring이 업무 DB와 상태 변경을 소유. FastAPI는 승인된 계산용 view와 필요한 table의 `SELECT`만 허용 | 결과 정본과 변경 책임을 한 서비스에 둠 |
+| 14 | DB 소유권 | Spring이 업무 DB와 상태 변경을 소유. FastAPI reader는 아래 4개 view의 SELECT만 사용하고 업무 table 직접 조회·DML·DDL·migration은 금지 | 결과 정본과 변경 책임을 한 서비스에 둠. 목록·전체 컬럼·source 선택·검증은 [0004](0004-reader-view-contract.md) |
 | 15 | 원본 저장 | AWS는 private S3. Spring은 읽기·쓰기, FastAPI는 읽기만 허용 | ECS task 사이 로컬 디스크를 공유하지 않음 |
 | 16 | 긴 작업 전달 | 정제·계산·백테스트는 SQS job/result queue. Spring이 결과를 검증하고 저장 | HTTP timeout과 재시도 중복을 분리 |
 | 17 | 짧은 작업 전달 | 시나리오·AI 인사이트만 private 내부 HTTP | 짧은 응답은 동기 계약이 단순함 |
@@ -28,6 +28,13 @@
 확정했습니다. S3·RDS adapter와 SQS worker runtime은 구현되어 있습니다. 기본 실행은 mock이며,
 실제 계산 엔진과 Spring 연동이 검증될 때까지 mock router, local storage fallback과 현재 schema를
 유지합니다.
+
+## 조회 전용 DB 계약 (#34)
+
+DB 조회 대상은 `ai_product_daily_stocks_v1`, `ai_cleaning_sources_v1`, `ai_cleaning_products_v1`,
+`ai_cleaning_previous_units_v1`로 확정돼 있습니다(#34). Spring V13/V14와 AI repository가 같은
+이름·컬럼을 사용합니다. 전체 컬럼과 소유권·source 선택 기준은 [0004](0004-reader-view-contract.md)를 따릅니다.
+아래 목록은 이 조회 계약과 별도로 남은 항목입니다.
 
 ## 미정
 

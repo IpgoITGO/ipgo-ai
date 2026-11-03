@@ -18,12 +18,12 @@ flowchart LR
 ```
 
 - Spring이 업무 DB와 작업 상태를 소유합니다. FastAPI는 승인된 계산용 view와 필요한 table을
-  조회만 하고 결과를 DB에 쓰지 않습니다.
+  조회만 하고 결과를 DB에 쓰지 않습니다. 현재 조회 대상과 컬럼은 [0004](decisions/0004-reader-view-contract.md)를 따릅니다.
 - 엑셀은 정제할 때 S3에서 한 번 읽습니다. 계산은 DB의 일별 재고 view를 읽습니다.
 - 정제 작업 1건은 업로드 파일 1개입니다. 어느 업로드의 기록을 읽을지는 Spring이 source ID로
   알려 주며 덮어쓴 파일은 Spring이 제외합니다.
-- 월 경계 검산은 Spring이 지정한 이전 유효 source를 기준으로 합니다. FastAPI가 임의로 최신
-  업로드를 선택하지 않습니다.
+- 월 경계 검산은 Spring이 지정한 이전 source를 기준으로 합니다. AI는 같은 회원·창고의 직전 월
+  최신 revision과 요청 ID가 일치하는지 독립적으로 확인하며, 과거 DONE source로 바꾸지 않습니다([0003](decisions/0003-cleaning-connection.md)).
 - 계약 원본은 `schemas/`입니다. FastAPI가 만드는 OpenAPI(`/docs`, `/openapi.json`)로 Spring DTO를 만듭니다.
 
 ## 데이터와 권한
@@ -38,6 +38,21 @@ flowchart LR
 
 DB migration role, Spring runtime role, FastAPI reader role의 자격 증명은 분리합니다. queue message에는
 원본 파일, DB 자격 증명, 개인정보, 장기 presigned URL을 넣지 않습니다.
+
+### FastAPI 조회 대상 (#34)
+
+Spring이 view 원본과 업무 쓰기를 소유하고 migration role이 schema·권한을 관리합니다.
+reader는 아래 view의 SELECT만 사용합니다. 전체 컬럼과 source 선택 규칙은 [0004](decisions/0004-reader-view-contract.md)가 정본입니다.
+
+| view | 조회 목적·source 범위 |
+|---|---|
+| `ai_product_daily_stocks_v1` | Spring이 고른 upload IDs·창고의 일별 재고. 같은 transaction에서 회원·창고·DONE 상태 선검사 |
+| `ai_cleaning_sources_v1` | 현재 PROCESSING 파일 소유권·경로와 직전 월 최신 revision 검증. view 자체는 모든 상태 포함 |
+| `ai_cleaning_products_v1` | 요청 회원의 기존 바코드 |
+| `ai_cleaning_previous_units_v1` | 검증한 이전 파일·회원·창고의 단위별 마지막 재고 |
+
+view의 security barrier는 회원별 RLS가 아닙니다. 회원·창고·source 조건은 repository가 검사합니다.
+read-only transaction에 더해 DB role의 DML·DDL 거부를 검증하며, AI에 업무 table 직접 접근을 추가하지 않습니다.
 
 ## 작업 전달 방식
 
