@@ -6,7 +6,7 @@ Spring Boot 백엔드가 이 서버를 호출하고, 계산 결과 저장은 백
 기본 HTTP 실행은 mock입니다. `ENGINE_MODE=real`에서는 단일 XLSX 정제와 계산·직접 시나리오에
 실제 엔진을 연결합니다. 백테스트 구현과 계산 결과에서 인사이트 입력을 만드는 변환은 아직
 미완료입니다. `/engine/insight`의 LLM은 계산과 별도로 동작하며 사용할 때만 API key가 필요합니다.
-이 변경은 배포하지 않았고 실제 RDS·S3·SQS·Spring 저장을 통합 검증하지 않았습니다.
+0.4.0의 전송 계약 추가를 실제 배포·Spring 저장·LLM 통합 완료로 보지 않습니다.
 
 ## 실행
 
@@ -73,7 +73,7 @@ ruff check .                     # 코드 검사
 422 `INVALID_INPUT`입니다. worker에서 발생한 `CalculationInputError`는 `FAILED/INVALID_INPUT`으로
 반환합니다. 일반 DB·네트워크 오류의 기존 재시도 방식은 유지합니다.
 
-이 단계의 `engineVersion`은 `0.3.0`입니다. 입고가 필요한 계산의 `expectedShortageOn`은 신규 입고 0개·기존 발주를 반영한 시뮬레이션에서
+이 단계의 `engineVersion`은 `0.4.0`입니다. 입고가 필요한 계산의 `expectedShortageOn`은 신규 입고 0개·기존 발주를 반영한 시뮬레이션에서
 커버 기간 안에 재고가 처음 0이 되는 날짜입니다. 기간 밖의 소진일을 임의로 추정하지 않습니다.
 DA-07 품절 위험, DA-13 정확도와 백테스트는 아직 계산하지 않습니다. `riskStatus`, 위험도·표본 수·정확도 등급·
 평가 수치는 `null`이며 **품절 없음, 위험 0%, 평가 통과를 뜻하지 않습니다.** `validObservationDays`는
@@ -113,6 +113,22 @@ embedded worker가 비정상 종료되면 health가 503입니다. worker는 결�
 
 검증: `pytest -q`, `ruff check .`. 정제 연결 테스트는 가짜 XLSX를 사용하고 계산 연결 테스트는
 DB 조회만 대체합니다. 실제 업무 연동 완료나 배포 승인을 뜻하지 않습니다.
+
+## AI 인사이트 전송 계약 (#10)
+
+현재 계약은 [0002](docs/decisions/0002-insight-contract.md)입니다. FastAPI는 이름 목록으로 LLM 초안과
+검사 결과를 만들고, 숫자·방향 문구 삽입/대조·기본문장·화면 `mode`는 Spring이 처리합니다.
+
+- `InsightInput.placeholders`는 값 dict가 아닌 이름 list입니다. `directions` 값은 `높음/낮음/같음`입니다.
+  설명 시나리오와 산식 대체·시작 재고 추정·도착일 없는 발주 여부를 전송할 수 있습니다.
+- `InsightResponse`는 기존 초안·통과/실패·사유·시간/비용에 `promptVersion`을 더합니다.
+  실제 서비스는 사용한 prompt 버전, 모의 응답은 `mock`을 반환합니다. FastAPI 응답에 `mode`나 기본 문장은 넣지 않습니다.
+- 계산 요청의 `noDateReceipts: [{productId, quantity}]`는 설명용이며 해당 상품의 `noDateReceiptQty`로 합산합니다.
+  양수 정수 수량만 받고 권장량·재고 시뮬레이션에는 넣지 않습니다. 도착일 있는 발주는 `plannedReceipts`로 분리합니다.
+- real 계산은 `methodFallback` 메타데이터를 제공하지만, 위험 산출·입력 변환 구현 전에는
+  `riskBasis`·`insightInput`을 null로 유지합니다. null을 표본 부족이나 SKU 위험으로 추측하지 않습니다.
+- mock calculate의 `insightInput`을 그대로 mock insight로 보낼 수 있습니다. 이는 전송 형식 검증용 합성 예시이며
+  실제 변환 함수·Spring 저장·유료 LLM 응답의 증거가 아닙니다. `to_insight_input()` 구현은 #36의 별도 작업입니다.
 
 ## AWS 데이터 접근 계약
 

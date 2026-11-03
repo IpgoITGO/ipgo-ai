@@ -1,3 +1,3 @@
 {"validation": "PASSED",
- "draft": "권장량 {qty_p100}개는 다음 입고 때 {ending_p100}개만 남기면서 품절 위험을 {risk_post_p100}로 낮춰요. {qty_p80}개로 줄이면 품절 위험이 {risk_post_p80}로 올라가요.",
- "failReason": null, "latencyMs": 1840, "costUsd": 0.0021}
+ "draft": "권장 입고량 {{qty_p100}}개를 넣으면 다음 입고 때 {{ending_p100}}개가 남고 도착 후 품절 위험은 {{risk_basis}} 추정치로 {{risk_post_p100}}입니다. 새 물량이 도착하기 전까지의 품절 위험은 수량과 관계없이 {{risk_pre}}입니다.",
+ "failReason": null, "latencyMs": 1840, "costUsd": 0.0021, "promptVersion": "mock"}

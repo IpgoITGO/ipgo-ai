@@ -1,10 +1,12 @@
-"""AI 인사이트 입출력 계약 — 초안 v0.1 (담당: 이석형 · 이 파일은 확인용 초안)
+"""AI 인사이트 전송 계약 (#10, 0002, #24 · Server #25).
 
-기준: API 명세서 4장 /engine/insight, 5장.
-계산 엔진(engine.ProductResult)에서 이 입력을 만드는 변환 함수는
-엔진 쪽(engine/insight_facts.py, 장준영)에 두는 것을 제안한다 → DA-11 "AI 작성 문장에 쓸 구조화 결과".
+FastAPI는 이름 목록으로 초안 생성·검사만 한다. 실제 값 삽입·대조·기본문장·mode는 Spring 책임이다.
+계산 결과→입력 변환 구현은 #36의 별도 작업이며 이 스키마에 포함하지 않는다.
 """
 from enum import StrEnum
+from typing import Literal
+
+from pydantic import Field, model_validator
 
 from .base import CamelModel, RiskStatus, ScenarioType
 
@@ -26,8 +28,21 @@ class InsightInput(CamelModel):
     sku_label: str                          # "상품 A" (실제 상품명 대신)
     recommended: ScenarioType               # 보통 P100
     placeholders: list[str]                 # ["qty_p80", "qty_p100", ..., "risk_pre"]
-    directions: dict[str, str]              # {"risk_post_p80_vs_p100": "높음", ...}
+    directions: dict[str, Literal["높음", "낮음", "같음"]]
     risk_status: RiskStatus
+    # 기존 이름 목록 요청도 수용한다. 새 변환기는 아래 계산 메타데이터를 명시적으로 채운다 (#36).
+    scenarios: list[ScenarioType] = Field(default_factory=list)
+    method_fallback: bool = False
+    start_stock_estimated: bool = False
+    has_no_date_receipts: bool = False
+
+    @model_validator(mode="after")
+    def _scenario_names_match_quantities(self) -> InsightInput:
+        if self.scenarios:
+            present = {scenario for scenario in ScenarioType if f"qty_{scenario.value.lower()}" in self.placeholders}
+            if len(set(self.scenarios)) != len(self.scenarios) or set(self.scenarios) != present:
+                raise ValueError("scenarios는 qty 자리 표시자가 있는 시나리오를 중복 없이 담아야 해요")
+        return self
 
 
 class InsightRequest(CamelModel):
@@ -41,3 +56,4 @@ class InsightResponse(CamelModel):
     fail_reason: FailReason | None = None
     latency_ms: int
     cost_usd: float
+    prompt_version: str = Field(min_length=1)  # 실제 서비스의 PROMPT_VERSION, 모의 응답은 "mock"

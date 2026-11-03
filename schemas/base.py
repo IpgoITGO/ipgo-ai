@@ -53,6 +53,11 @@ class RiskStatus(StrEnum):
     LOW_GRADE = "LOW_GRADE"
 
 
+class RiskBasis(StrEnum):
+    SKU = "SKU"
+    POOLED = "POOLED"
+
+
 class AccuracyGrade(StrEnum):
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"

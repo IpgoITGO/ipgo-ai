@@ -112,7 +112,8 @@ def _product(
     # DA-07/13 위험·등급은 검증 후 채우며 0으로 대체하지 않는다.
     return ProductResult(
         product_id=product_id, status=ResultStatus.OK if qty else ResultStatus.NOT_NEEDED,
-        method=method, method_reason=method_reason, multiplier=request.policy.multiplier,
+        method=method, method_reason=method_reason, method_fallback=method != request.policy.default_method,
+        multiplier=request.policy.multiplier,
         horizon_days=horizon, forecast_outbound_qty=cover, start_stock_qty=stock, start_stock_estimated=gap > 0,
         planned_receipts_in_horizon=planned_qty, pre_arrival_unmet_qty=baseline.pre_arrival_unmet,
         required_qty_before_rounding=need, recommended_qty=qty, recommended_amount=qty * settings.unit_cost,
@@ -148,6 +149,7 @@ def calculate(request: CalculateRequest, product_daily: pd.DataFrame) -> Calcula
     for product_id in ids:
         config = settings.get(product_id)
         result, planned = _product(request, daily, product_id, config)
+        result.no_date_receipt_qty = sum(r.quantity for r in request.no_date_receipts if r.product_id == product_id)
         if result.status is ResultStatus.OK:
             for kind, percent in [(ScenarioType.P80, 80), (ScenarioType.P100, 100), (ScenarioType.P120, 120)]:
                 qty = round_to_order_unit(result.recommended_qty * percent / 100, config.order_unit_qty)
