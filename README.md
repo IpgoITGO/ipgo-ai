@@ -116,6 +116,19 @@ DB 조회만 대체합니다. 실제 업무 연동 완료나 배포 승인을 �
 
 ## AWS 데이터 접근 계약
 
+Spring이 업무 데이터·상태·결과 저장을 소유하고 FastAPI reader는 다음 view를 `SELECT`만 합니다.
+정확한 컬럼·source 선택·권한과 검증 근거는 [조회 전용 view 계약](docs/decisions/0004-reader-view-contract.md)을 따릅니다.
+
+| view | 용도 |
+|---|---|
+| `ai_product_daily_stocks_v1` | 지정한 DONE source의 상품 일별 계산 입력 |
+| `ai_cleaning_sources_v1` | 현재 정제 파일의 소유권·상태와 이전 월 최신 revision 확인 |
+| `ai_cleaning_products_v1` | 회원별 기존 바코드와 새 상품 판정 |
+| `ai_cleaning_previous_units_v1` | 검증된 이전 파일의 재고관리단위별 월말 기말 |
+
+view는 회원별 RLS를 대신하지 않습니다. repository가 회원·창고·source를 확인하며 reader에는
+업무 table 직접 조회·DML·DDL·migration 권한을 주지 않습니다.
+
 단일 호스트 개발 환경에서 `AWS_DEV_COMPUTE_MODE=onebox`는 ARM 이미지와
 `ipgo-dev-onebox-ai-api` 서비스를 선택합니다. 검증한 구성은 mock API 최대 1개와 worker 0개이며,
 real 모드와 worker는 해당 코드의 메모리·부하를 별도로 검증해야 합니다. 기존 조회 전용 DB·IAM 역할은 유지합니다.
