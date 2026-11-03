@@ -80,7 +80,10 @@ def test_complete_input_has_no_missing_notes(case):
 
 def test_missing_keys_are_announced():
     # 키가 빠진 입력: 10/30 실제 호출에서 예시의 {{method}}를 베끼고 80% 문장에 120% 방향 키를 씀
-    user = build_prompt(InsightInput.model_validate(INSIGHT_REQUEST["input"])).user
+    payload = {**INSIGHT_REQUEST["input"],
+               "placeholders": [k for k in INSIGHT_REQUEST["input"]["placeholders"] if k != "risk_sample_size"],
+               "directions": {"risk_post_p80_vs_p100": "높음", "ending_p120_vs_p100": "높음"}}
+    user = build_prompt(InsightInput.model_validate(payload)).user
     assert "※ 작성 예시에 나오지만 이번 목록에 없는 자리 표시자: {{method}}, {{ending_p100}}" not in user
     assert "{{method}}" in user and "{{risk_sample_size}}" in user
     assert "※ 방향 자리 표시자가 없는 비교: p80 잔여 재고, p120 위험." in user

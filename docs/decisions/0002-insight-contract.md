@@ -1,189 +1,119 @@
 # 0002. AI 인사이트 연동 계약
 
-- 상태: **요구사항 · 명세 대조 반영 중** (#24 · IpgoITGO/ipgo-server#25) · pooled 위험은 요구사항 DA-07 반영 (#11) · 스키마 반영 #10
-- 기준: API 명세서 4장 `/engine/insight` · 5장, [0001](0001-engine-contract.md), [prompt 규칙과 기본 문장](../ai-insight/prompt-and-fallback.md) (#4)
-- 관련 요구사항: DA-11, AI-01 ~ AI-03, AI-05, AI-06
+- 상태: **결정 — 기존 합의 기록 반영 (2026-11-03, #10)**. 별도 미정은 5장에 한정한다.
+- 근거: [AI24 결정](https://github.com/IpgoITGO/ipgo-ai/issues/24#issuecomment-6553257648), [Server25 답변](https://github.com/IpgoITGO/ipgo-server/issues/25#issuecomment-6517684510), PR45·49, [0001](0001-engine-contract.md).
+- 원 합의/검토: 장준영·이석형, 서버 답변: 박혜윤. 현재 인계 반영: 이휘.
+  정무영의 최종 확인은 AI24 종료 조건으로 유지하며 전원 최종 확인 완료로 기록하지 않는다.
+- 관련: DA-11, AI-01~03·05~06, [prompt·기본문장](../ai-insight/prompt-and-fallback.md).
 
-기존 `ai_insight` 코드는 0001 합의 전에 만든 테스트 코드라서 `schemas/`와 다른 곳이 있습니다. 이석형 님이 정리한 비교표를 바탕으로 **이미 정해진 것**, **합의했지만 기록이 없는 것**, **새로 정할 것**을 나눴습니다.
+이 문서는 과거 값 dict·FastAPI 값 채우기/기본문장 제안을 위 합의대로 대체한다.
+이전 제안과 검토 이력은 Git 이력과 AI24·Server25에 보존한다. 새 계산 정책·유료LLM 활성화 결정이 아니다.
 
-## 1. 이미 정해진 것 — 기존 코드를 맞춤
+## 1. 책임과 데이터 경로
 
-| 항목 | 기존 `ai_insight` | 맞출 기준 |
-|---|---|---|
-| 시나리오 키 | `s80` · `s100` · `s120` · `custom` | `P80` · `P100` · `P120` · `CUSTOM` (`schemas/base.py`). 자리 표시자 이름 안에서는 소문자 `p80` |
-| 결과 상태 | `NORMAL` · `NO_RESTOCK_NEEDED` · `CANNOT_COMPUTE` | `ResultStatus` 5개 + `RiskStatus` 3개 (명세 6장). 4장 매핑 참고 |
-| 엔드포인트 | `/insight` · `/insight/validate` · `/insight/catalog` · `/health` | `/engine/insight` 하나. 검사기 · 목록은 `insight/` 안의 함수와 테스트로 유지. `/health`는 `app/main.py`에 있으므로 삭제 |
-| 스키마 위치 | `ai_insight` 안에 자체 모델 | `schemas/insight.py` 하나 (0001 결정 2) |
+| 기능 | 책임 |
+|---|---|
+| 계산 결과에서 인사이트 입력 생성 | 계산 엔진의 `to_insight_input()`; #36 별도 구현 작업 |
+| LLM 호출·초안 출력 검사 | FastAPI `insight/` |
+| 숫자·문구 자리 표시자 값 삽입과 대조 | Spring, 저장된 계산 결과와 비교표 형식 사용 |
+| 기본 문장 생성·실패 시 대체·화면 mode·DB 저장 | Spring |
 
-## 2. 합의했지만 기록이 없는 것 — 확인만
+엔진의 `ProductResult.insightInput`을 Spring이 저장하고 `{resultId, input}`으로
+`POST /engine/insight`에 보낸다. FastAPI는 값이 없는 `{{이름}}` 초안을 돌려준다.
+Spring이 숫자와 `formula_desc`·`risk_basis`·`label_*`·`action_*`·`dir_*` 문구까지 채우고 대조한다.
+LLM에는 원본 수불부·원가·계정 정보·다른 SKU를 보내지 않는다.
 
-| # | 항목 | 내용 |
-|---|---|---|
-| 2-1 | 입력을 만드는 쪽 | 엔진이 `engine/insight_facts.py`의 `to_insight_input()`으로 만든다 (DA-11 완료 조건) |
-| 2-2 | 자리 표시자 이름 | `qty_p100`처럼 snake_case, 시나리오는 접미사 `_p80` · `_p100` · `_p120` · `_custom` |
-| 2-3 | 방향 값 | `directions` 값은 `높음` · `낮음` · `같음` 3가지 |
+#10은 이 전송 형식·mock을 반영한다. 실제 입력 변환은 구현하지 않으며,
+현재 real 계산의 `insightInput`은 null이다. Server61의 입력 저장·재호출·문장 저장도 별도 구현이다.
 
-## 3. 새로 정할 것
+## 2. 요청과 입력
 
-### 3-1. 입력이 Spring을 거쳐 돌아오는 경로
+외부 필드는 camelCase, Python은 snake_case다. 명세에 없는 필드는 거부한다.
 
-지금 `InsightRequest`는 `{resultId, input}`인데 `CalculateResponse`에는 InsightInput이 없습니다. 그대로 두면 Spring이 입력을 직접 만들어야 해서 자리 표시자 로직이 세 곳(엔진 · 인사이트 · Spring)에 생깁니다.
+| 필드 | 형식·의미 |
+|---|---|
+| `resultId` | 저장된 결과 ID; Spring이 요청에 붙임 |
+| `input.skuLabel` | 실제 상품명 대신 쓰는 별칭 |
+| `input.riskStatus` | `OK`·`INSUFFICIENT_SAMPLE`·`LOW_GRADE`. null은 유효한 입력이 아님 |
+| `input.recommended` | `ScenarioType`, 보통 `P100` |
+| `input.placeholders` | 자리 표시자 **이름 list**. 화면 값 dict를 받지 않음 |
+| `input.directions` | `ending_p80_vs_p100`·`risk_post_p120_vs_p100` 등의 비교; 값은 `높음`·`낮음`·`같음` |
+| `input.scenarios` | 중복을 제외한 설명 대상 `P80`·`P100`·`P120`·`CUSTOM` 목록 |
+| `input.methodFallback` | 기본 산식 대신 다른 산식을 사용했는지 |
+| `input.startStockEstimated` | 시작 재고가 추정값인지 |
+| `input.hasNoDateReceipts` | 도착 예정일 없는 미반영 발주가 있는지 |
 
-**제안:** 엔진이 계산할 때 `ProductResult.insightInput`을 채우고, Spring은 저장했다가 `/engine/insight`에 그대로 보냅니다.
+`status`와 화면 형식 값 dict는 InsightInput에 넣지 않는다. Spring은 `status=OK` 결과만 호출한다.
+계산 불가·입고 불필요·검산 제외·재업로드 필요는 FastAPI를 호출하지 않고 Spring이 처리한다.
+`riskStatus=null`인 현재 미구현을 임의 `INSUFFICIENT_SAMPLE`로 바꾸지 않는다. 실제 상태를 산출하기
+전까지 입력을 만들지 않으며, 생성 보류/화면 처리는 실제 연결 작업에서 명시한다.
 
-```mermaid
-flowchart LR
-    E[엔진 calculate] -->|ProductResult.insightInput| S[Spring 저장]
-    S -->|POST /engine/insight| I[AI 인사이트]
-    I -->|draft 자리 표시자 문장| S
-    S -->|insightInput.placeholders로 값 채움| F[화면]
-```
-
-### 3-2. 기존 `build_catalog` 로직 위치
-
-`engine/`은 `insight/`를 import할 수 없으므로(경계 테스트), 기존 `placeholders.build_catalog` 로직을 **새로 짜지 않고 `engine/insight_facts.py`로 옮깁니다.** 담당은 장준영, 리뷰는 이석형 님입니다. `insight/`는 `schemas`와 `engine.insight_facts`를 import해서 씁니다.
-
-### 3-3. InsightInput 필드
-
-prompt가 정상 · 확인 필요 · 판단 보류를 구분하려면 이름 목록만으로는 부족합니다. `placeholders`는 목록에서 **이름 → 화면 형식 값** dict로 바꿉니다. Spring은 이 dict로 값을 채우고, LLM에 값을 보낼지는 `AI_INSIGHT_INCLUDE_VALUES`로 정합니다.
-
-| 필드 | 형식 | 용도 | 변경 |
-|---|---|---|---|
-| `skuLabel` | `"상품 A"` | 실제 상품명 대신 | 유지 |
-| `status` | `ResultStatus` | 상태 판정 | 추가 |
-| `riskStatus` | `RiskStatus` | 판단 보류 판정 | 유지 |
-| `recommended` | `ScenarioType` | 권장 시나리오 | 유지 |
-| `scenarios` | `["P80", "P100", "P120"]` | 설명할 시나리오 (중복 제외) | 추가 |
-| `methodFallback` | bool | 기본 산식 대신 다른 산식을 썼는지 → 산식 사유 문장 | 추가 |
-| `startStockEstimated` | bool | 시작 재고가 추정값인지 → 확인 필요 | 추가 |
-| `hasNoDateReceipts` | bool | 도착 예정일 없는 발주가 있는지 → 확인 필요 | 추가 (3-8) |
-| `placeholders` | `{"qty_p100": "1,240", ...}` | 자리 표시자 이름과 값 | 목록 → dict |
-| `directions` | `{"risk_post_p80_vs_p100": "높음", ...}` | 권장량 대비 방향 | 유지 |
-
-<details>
-<summary>입력 예시</summary>
+기존 요청 호환을 위해 새 메타데이터는 `scenarios=[]`, bool3개=false를 기본으로 수용한다.
+새 변환기는 실제 계산 결과의 값을 명시적으로 채워야 한다. 이 기본값을 real 계산의 상태 판정 근거로 쓰지 않는다.
+비어 있지 않은 scenarios를 보내면 qty 자리 표시자의 시나리오들과 일치하고 중복이 없어야 한다.
+이번 #10은 prompt/검사 규칙을 바꾸지 않으며 새 메타데이터에 따른 문장 보강은 AI 담당 작업과 조율한다.
 
 ```json
 {
-  "skuLabel": "상품 A",
-  "status": "OK",
-  "riskStatus": "OK",
-  "recommended": "P100",
-  "scenarios": ["P80", "P100", "P120"],
-  "methodFallback": true,
-  "startStockEstimated": false,
-  "hasNoDateReceipts": false,
-  "placeholders": {
-    "method": "계산식 B", "method_reason": "작년 동일 구간 유효 관측일 부족으로 A 사용 불가",
-    "horizon_days": "34", "forecast_outbound": "96", "multiplier": "110%",
-    "start_stock": "30", "planned_receipts": "0",
-    "qty_p80": "72", "qty_p100": "84", "qty_p120": "108",
-    "ending_p80": "0", "ending_p100": "18", "ending_p120": "42",
-    "risk_post_p80": "30%", "risk_post_p100": "10%", "risk_post_p120": "3%",
-    "risk_pre": "7%", "risk_sample_size": "120"
-  },
-  "directions": {
-    "ending_p80_vs_p100": "낮음", "risk_post_p80_vs_p100": "높음",
-    "ending_p120_vs_p100": "높음", "risk_post_p120_vs_p100": "낮음"
+  "resultId": 9001,
+  "input": {
+    "skuLabel": "상품 A", "riskStatus": "OK", "recommended": "P100",
+    "scenarios": ["P100"], "methodFallback": false,
+    "startStockEstimated": false, "hasNoDateReceipts": false,
+    "placeholders": ["qty_p100", "ending_p100", "risk_post_p100", "risk_pre"],
+    "directions": {}
   }
 }
 ```
-</details>
 
-### 3-4. 자리 표시자 이름 대응표
+위는 형식 예시이며 완전한 생성 입력 예시는 `tests/payloads.py`와 mock calculate다.
+운영 입력에 필요한 최소 이름은 prompt 문서5-1을 따른다. AI53의 예시·키 보강 뒤에는 목록을 함께 대조한다.
+자리 표시자는 snake_case와 시나리오 접미사를 쓴다: `qty_p100`, `ending_p120`, `risk_post_p120` 등.
+감싸는 문법은 `{{이름}}`이다. 실제 값은 list에 넣지 않고 Spring이 원래 계산 결과에서 꺼낸다.
 
-원칙: **`schemas/engine.py` 필드 이름을 따릅니다.** 0001 미정의 `ending_p120` · `risk_post_p120`은 아래 규칙으로 함께 정해집니다.
+## 3. 계산 계약의 메타데이터
 
-| 기존 (#4 문서) | 새 이름 | 비고 |
-|---|---|---|
-| `base_date` | `as_of_date` | `CalculateRequest.as_of_date` |
-| `lead_time` · `restock_cycle` · `order_unit` | `lead_time_days` · `review_cycle_days` · `order_unit_qty` | `ProductSettings` |
-| `cover_days` | `horizon_days` | |
-| `current_stock` | `start_stock` | |
-| `pending_qty` | `planned_receipts` | 커버 기간 안 도착분 |
-| `unreflected_qty` | `no_date_receipts` | 3-8 |
-| `cannot_reason` | `reason` | |
-| `formula` · `formula_reason` | `method` · `method_reason` | |
-| `formula_desc` | 없음 | 산식별 고정 문구 → `insight/` 상수 |
-| `cover_demand` | `forecast_outbound` | 배수 적용 전 |
-| `multiplier` | `multiplier` | |
-| `recent_28d_avg` | 없음 | `ProductResult`에 없음. 필요하면 요청 |
-| `range_low` · `range_high` | `forecast_range_low` · `forecast_range_high` | `riskStatus=LOW_GRADE`일 때만 (3-8) |
-| `risk_before` | `risk_pre` | |
-| `risk_basis` | `risk_basis` | `ProductResult.riskBasis`(`SKU` · `POOLED`) → "이 상품의 과거 오차 기준" · "전체 상품의 과거 오차 기준" (3-8) |
-| `sample_n` | `risk_sample_size` | |
-| `qty.K` · `remain.K` · `deplete.K` · `unmet.K` | `qty_pK` · `ending_pK` · `depletion_pK` · `unmet_pK` | `ScenarioResult` |
-| `risk_after.K` | `risk_post_pK` | |
-| `diff.K` | `diff_pK` | 권장량과의 수량 차이 |
-| `label.K` · `action.K` | 없음 | 숫자가 아닌 고정 문구 → 3-6 |
-| `dir.*.connect` · `dir.*.end` | `dir_ending_pK_connect` 등 | 3-6 |
+| 필드 | 계약 |
+|---|---|
+| `CalculateRequest.noDateReceipts` | `[{productId, quantity}]`, 상품 ID/정수 수량은 양수. 기존 요청 기본값은 빈 목록 |
+| `ProductResult.noDateReceiptQty` | 해당 결과 상품의 noDateReceipts 수량 합계, 기본0. **권장량·재고 시뮬레이션에 사용하지 않음** |
+| `ProductResult.methodFallback` | 산식이 있는 결과에서 요청 기본 방식과 실제 선택 방식이 다른지; 산식 미산출은 null |
+| `ProductResult.riskBasis` | `SKU`·`POOLED` 또는 미산출 null. DA-07 구현 전 SKU로 추측하지 않음 |
+| `ProductResult.insightInput` | `InsightInput` 또는 null. 위험 상태가 일치하는 OK 결과에만 제공 가능 |
 
-### 3-5. 자리 표시자 문법은 `{{이름}}`
+noDateReceipts가 같은 상품에 여러 건이면 메타데이터 수량을 합산하고 다른 상품 건은 섞지 않는다.
+이 메타데이터만으로 새 상품을 계산 대상으로 추가하지 않는다. 기존 `plannedReceipts`는 도착일 있는 발주만 담는다.
+전송 형식·메타데이터 추가로 engineVersion은0.4.0이며 기존 DA03/04/06 계산식과 손계산 fixture는 유지한다.
 
-LLM 출력이 `{"sentences": [...]}` JSON이라 중괄호 1개는 헷갈립니다. 이름은 2-2 규칙, 감싸는 문법은 기존 `{{ }}`를 씁니다. 예: `권장량 {{qty_p100}}개를 넣으면`. mock 응답(`app/mock_data/insight.json`)도 같이 고칩니다.
+pooled 위험은 기존 DA-07 요구사항을 유지한다. SKU 표본 부족 시 전체 상품 오차 표본을 사용하고,
+전체로도 부족하면 INSUFFICIENT_SAMPLE로 판정한다. 실제 구현/검증은 #36 후속이다.
+LOW_GRADE의 예상 출고량 범위와 null 위험도 역시 기존 의미를 유지하며 임의 수치를 만들지 않는다.
 
-### 3-6. 숫자가 아닌 자리 표시자는 FastAPI가 채움
+## 4. FastAPI 응답과 Spring 처리
 
-방향(`높아지고` · `높아집니다`), 행동(`줄이면` · `늘리면`), 시나리오 명칭은 입력의 `directions`와 시나리오 정보만으로 정해집니다. **FastAPI가 응답 전에 이 문구를 채우고, Spring에는 숫자 자리 표시자만 남은 `draft`를 보냅니다.** Spring은 한국어 활용형 규칙을 몰라도 되고, `VALUE_MISMATCH` 검사는 숫자만 보면 됩니다.
+| 필드 | 의미 |
+|---|---|
+| `validation` | `PASSED`·`FAILED` |
+| `draft` | 통과한 자리 표시자 초안 str; 실패하면 null |
+| `failReason` | `LLM_ERROR`·`LLM_TIMEOUT`·`VALIDATION_FAILED`, 통과하면 null |
+| `promptVersion` | 실제 생성 서비스가 사용한 PROMPT_VERSION; 모의 응답은 `mock` |
+| `latencyMs`·`costUsd` | 기존 시간·비용 필드 유지. 호출 오류 등 비용을 모르면 기존 계약대로0 |
 
-### 3-7. 응답에 기본 문장 · 설명 방식 · 버전 추가
+FastAPI는 `mode`, `templateVersion`, `fallbackDraft`를 만들지 않는다. 상세 검사 사유는 현재 로그에
+남기며 이번 #10에서 `failDetail`이나 모델/토큰 필드를 임의 추가하지 않는다. 추가 전송 범위는 별도 합의한다.
+LLM의 JSON 문장 배열은 FastAPI가 검사해 `draft` 하나의 글로 돌려주는 현재 동작을 유지한다.
+Spring 공개 API의 문장 배열과 `AI/FIXED/TABLE_ONLY` 화면 mode는 Server25/61·AI44에서 맞춘다.
 
-LLM이 실패하면 FastAPI가 기본 문장(template)을 같은 자리 표시자 형태로 `draft`에 담습니다. Spring은 어느 경우든 값만 채우면 되고, template을 Java로 다시 만들지 않습니다.
+LLM 시간 초과·호출 오류·검사 탈락은 HTTP200 + FAILED/null draft다. 키 없음501·잘못된 입력422와
+무응답/시간 제한 초과도 Spring이 구분해 기본 문장으로 대체한다. 값 대조 실패는 Spring에서만 발생한다.
+기본문장 원본은 prompt 문서6장이며, 숫자 형식은 Spring 비교표와 동일하게 맞춘다.
 
-| 필드 | 값 | 변경 |
-|---|---|---|
-| `validation` | `PASSED` · `FAILED` (LLM 문장 검사 결과) | 유지 |
-| `mode` | `LLM` (LLM 문장 통과) · `TEMPLATE` (LLM 미호출 · 실패 → 기본 문장) · `NONE` (기본 문장도 실패 → 비교표만) | 추가 |
-| `draft` | 자리 표시자 문장. `NONE`이면 null | 의미 변경 |
-| `failReason` | `LLM_ERROR` · `LLM_TIMEOUT` · `VALIDATION_FAILED` | 유지 |
-| `failDetail` | `raw_number` · `unknown_key` 등 상세 사유 | 추가 (로그용) |
-| `promptVersion` · `templateVersion` | `prompt-2026.10.21-v0.4` 등 | 추가 |
-| `latencyMs` · `costUsd` | | 유지 |
+## 5. 별도로 남은 것
 
-명세가 바뀌는 항목이라 합의 후 명세 → `schemas/` → Spring 순서로 반영합니다.
+- AI24의 정무영 최종 확인과 Server API 명세 반영/저장 연결. 기존 합의 기록 자체를 미정으로 되돌리지 않는다.
+- AI44의 최종 화면 상태 이름·추가 실패 사유·문장 형태·연동 시험 날짜.
+- CUSTOM 입력 갱신과 문장 재생성 시점/범위.
+- AI53의 no_date_receipts 설명·정상 예시 ending_p80·필수 키표/버전 보강.
+- #36 별도 입력 변환 구현, DA-07/백테스트/정확도, 실제 계산31상품·실제 LLM/화면 전체 검증.
 
-### 3-8. 엔진 쪽 결정 (장준영, 2026-10-28)
-
-| 항목 | 결정 | 이유 | 인사이트 영향 |
-|---|---|---|---|
-| pooled 위험 | **요구사항 DA-07 · 기획서 · MVP 정의서대로 씀** (2026-10-28 변경). SKU 표본이 최소 기준 미만이면 전체 SKU 오차 비율을 쓰고, 전체로도 미만이면 `riskStatus=INSUFFICIENT_SAMPLE`. 어느 쪽을 썼는지 `ProductResult.riskBasis`(`SKU` · `POOLED`)로 돌려줌 | 처음에는 "이력이 짧은 상품의 위험이 낮게 나올 수 있다"는 이유로 빼기로 했으나, 요구사항 문서와 어긋남. 그 우려는 DA-10(위험 구간별 실제 품절 비율)에서 검증 | `risk_basis` 유지 |
-| 도착 예정일 없는 발주 | `CalculateRequest.noDateReceipts: [{productId, quantity}]`로 받아 `ProductResult.noDateReceiptQty`와 InsightInput에 넘김. **계산에는 쓰지 않음** | InsightInput을 엔진 한 곳에서 만듦(3-1). `plannedReceipts`와 필드를 나눠 계산에 섞이지 않게 함 | `hasNoDateReceipts`와 `no_date_receipts` 자리 표시자 사용 가능 |
-| `plannedReceiptsInHorizon` 의미 | 커버 기간 안에 도착하는 기존 발주 **수량 합계** | 권장량 계산에서 빼는 값 | `planned_receipts`에 그대로 씀. 스키마에 주석 추가 |
-| `forecastRangeLow/High` 의미 | 커버 기간 예상 출고량(`forecastOutboundQty`)의 범위. 계산 방식은 DA-13에서 확정 | `LOW_GRADE`일 때 위험 대신 보여 줄 값 | `forecast_range_low` · `forecast_range_high` |
-| `LOW_GRADE`일 때 `preArrivalRisk` | null | `postArrivalRisk`와 같은 오차 분포를 씀 | `risk_pre` 없음 |
-
-## 4. 상태 매핑 (#4 문서 1장 기준)
-
-[#4 문서](../ai-insight/prompt-and-fallback.md) 1장을 기준으로 하고, 확인 필요 조건에 도착 예정일 없는 발주를 더합니다. 여러 조건이 겹치면 `산출 불가 > 판단 보류 > 확인 필요 > 정상` 순서로 하나만 고릅니다. 판정은 `insight/`가 InsightInput만 보고 합니다.
-
-| 입력 | 인사이트 상태 | LLM | `mode` |
-|---|---|---|---|
-| `status=OK`, `riskStatus=OK`, 아래 조건 없음 | 정상 | 예 | `LLM` 또는 `TEMPLATE` |
-| `status=OK` + `riskStatus=LOW_GRADE`, `startStockEstimated`, `hasNoDateReceipts` 중 하나 | 확인 필요 | 예 | `LLM` 또는 `TEMPLATE` |
-| `status=OK` + `riskStatus=INSUFFICIENT_SAMPLE` | 판단 보류 | 예 | `LLM` 또는 `TEMPLATE` |
-| `status=NOT_NEEDED` | 입고 불필요 | 아니오 | `TEMPLATE` |
-| `status=NOT_CALCULABLE` | 산출 불가 | 아니오 | `TEMPLATE` |
-| `status=EXCLUDED` · `REUPLOAD_REQUIRED` | 산출 불가 | 아니오 | `TEMPLATE` (5장 확인 필요) |
-
-- `LOW_GRADE`이면 위험 대신 예상 출고량 범위(`forecast_range_low` ~ `forecast_range_high`)로 설명합니다.
-- 시작 재고 추정 문장은 상태와 별도로, 해당하면 항상 붙입니다.
-- 산식 사유 문장은 `methodFallback = true`일 때만 붙입니다. `methodReason`은 대체하지 않아도 "평가 결과 기본 방식"처럼 값이 있습니다.
-
-## 5. 아직 열린 것
-
-| 항목 | 내용 | 확인할 사람 |
-|---|---|---|
-| 도착 예정일 없는 발주 | 3-8의 `CalculateRequest.noDateReceipts`를 Spring이 보낼 수 있는지 | 백엔드 |
-| 화면 값 형식 | 소수인 재고(`ending` · `start_stock`)를 `placeholders`에 어떻게 넣을지. 0001 미정 "화면 정수 표시 규칙"에 따름 | 프론트 · 백엔드 |
-| 직접 입력 시나리오 | `/engine/scenarios`로 `CUSTOM`이 생기면 인사이트를 다시 만들지, 입력은 누가 갱신할지 | 이석형 · 백엔드 |
-| `EXCLUDED` · `REUPLOAD_REQUIRED` | 인사이트 문장을 보여 줄지, Spring이 호출하지 않을지 | 백엔드 |
-| `insightInput` 저장 · 응답 필드 추가 · `{{ }}` 문법 | 3-1, 3-5, 3-7 | 백엔드 |
-
-## 합의 후 할 일
-
-- [ ] 이 문서 상태를 "결정"으로 바꾸고 날짜 기록, 0001 미정의 자리 표시자 항목 닫기
-- [ ] `schemas/insight.py` · `schemas/engine.py`(`insightInput` · `noDateReceipts` · `noDateReceiptQty` · `riskBasis`) 수정 — 장준영
-- [ ] `engine/insight_facts.py`로 `build_catalog` 이식, 이석형 님 리뷰 — 장준영
-- [ ] `insight/`로 기존 코드 이동, 이름 · 상태값 교체, 검사기 정규식 갱신 — 이석형
-- [ ] #4 문서(prompt · template) 자리 표시자 이름 갱신, 미반영 물량 문장 복원, 산식 사유 조건을 `methodFallback`으로 변경 — 이석형
-- [ ] 백엔드에 3-1 · 3-5 · 3-7 공유, 명세 반영 요청
+이번 계약/schema/mock 검증을 실제 입력 변환·Server 저장·LLM 활성화나 전체 업무 효과 완료로 보지 않는다.

@@ -55,10 +55,15 @@ DB 조회 대상은 `ai_product_daily_stocks_v1`, `ai_cleaning_sources_v1`, `ai_
 이름·컬럼을 사용합니다. 전체 컬럼과 소유권·source 선택 기준은 [0004](0004-reader-view-contract.md)를 따릅니다.
 아래 목록은 이 조회 계약과 별도로 남은 항목입니다.
 
+## 인사이트 전송 계약 (#10)
+
+자리 표시자는 `qty_p100`·`ending_p120`·`risk_post_p120` 등의 이름 목록과 `{{이름}}` 문법을 씁니다.
+FastAPI는 초안·검사 결과·promptVersion을 반환하고 Spring이 값 삽입·대조·기본문장·화면 mode를 맡습니다.
+요청·응답 및 nullable `ProductResult.insightInput`의 현재 계약은 [0002](0002-insight-contract.md)를 따릅니다.
+schema/mock 반영과 실제 입력 변환 구현은 분리하며, 변환 구현은 #36의 별도 작업입니다.
+
 ## 미정
 
 - [ ] 입고 주기 추정 범위: 이번 파일만이 아니라 누적 기록으로 추정하는 방법
 - [ ] 화면 정수 표시 규칙: 백엔드 제안은 "모두 올림". 재고(시작 · 잔여 · 날짜별)는 내림이 보수적이라는 의견 있음 (프론트와 확정)
-- [ ] 자리 표시자 목록: `ending_p120` · `risk_post_p120` 추가 여부 (이석형) → [0002](0002-insight-contract.md) 3-4에서 함께 정함
-- [ ] `/engine/insight` 입출력과 `ProductResult.insightInput`: [0002](0002-insight-contract.md)(#7)에서 바뀜. 합의 전까지 지금의 인사이트 mock을 기준으로 개발하지 않음
 - [ ] LOW 등급 예측 범위 계산 방식 (DA-13 작업 때 장준영)

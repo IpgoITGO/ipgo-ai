@@ -17,9 +17,11 @@ from .base import (
     CamelModel,
     Method,
     ResultStatus,
+    RiskBasis,
     RiskStatus,
     ScenarioType,
 )
+from .insight import InsightInput
 
 # =====================================================================
 # 1. POST /engine/clean — 수불부 정제·검증 (DA-01, DA-02) · 120초
@@ -142,11 +144,18 @@ class ProductSettings(CamelModel):
 
 
 class PlannedReceiptInput(CamelModel):
-    """기존 발주 물량. 도착 예정일 없는 건(NO_DATE)은 Spring이 빼고 보낸다."""
+    """도착 예정일이 있는 기존 발주 물량. NO_DATE는 no_date_receipts로 분리한다."""
 
     product_id: int
     quantity: int = Field(ge=1)
     expected_on: date
+
+
+class NoDateReceiptInput(CamelModel):
+    """도착일 없는 발주 수량(개). 설명용 메타데이터이며 수량 계산/시뮬레이션에는 넣지 않는다."""
+
+    product_id: int = Field(ge=1, strict=True)
+    quantity: int = Field(ge=1, strict=True)
 
 
 class CalculateRequest(CamelModel):
@@ -160,6 +169,7 @@ class CalculateRequest(CamelModel):
     policy: Policy
     settings: list[ProductSettings]
     planned_receipts: list[PlannedReceiptInput] = []
+    no_date_receipts: list[NoDateReceiptInput] = Field(default_factory=list)
 
 
 class DailyProjection(CamelModel):
@@ -193,6 +203,7 @@ class ProductResult(CamelModel):
     # 계산 근거 (FE-05 · K1 result)
     method: Method | None = None
     method_reason: str | None = None        # "평가 결과 기본 방식", "작년 자료 없어 B로 대체"
+    method_fallback: bool | None = None     # 산식이 있는 결과에서 기본 방식과 실제 방식의 차이
     multiplier: float | None = None
     horizon_days: int | None = None         # 커버 기간 H = 입고 주기 + 리드타임
     forecast_outbound_qty: float | None = None
@@ -209,6 +220,9 @@ class ProductResult(CamelModel):
     pre_arrival_risk: float | None = Field(None, ge=0, le=1)
     risk_sample_size: int | None = None
     risk_status: RiskStatus | None = None
+    risk_basis: RiskBasis | None = None     # DA-07 미산출은 SKU/POOLED로 추측하지 않는다.
+    no_date_receipt_qty: int = Field(default=0, ge=0)
+    insight_input: InsightInput | None = None  # #36 별도 변환 구현 전 real 계산은 null 유지
 
     # 정확도 (DA-13). 유효 관측일 7일 미만이면 grade 없이 NOT_CALCULABLE
     accuracy_grade: AccuracyGrade | None = None
@@ -226,6 +240,11 @@ class ProductResult(CamelModel):
         """계산 불가 · 제외 결과는 이유 없이 내보내지 않는다 (0개로 바꾸지 않는다)."""
         if self.status in _REASON_REQUIRED and not self.reason:
             raise ValueError(f"status가 {self.status}이면 reason이 필요해요")
+        if self.insight_input is not None and (
+            self.status != ResultStatus.OK or self.risk_status is None
+            or self.insight_input.risk_status != self.risk_status
+        ):
+            raise ValueError("insightInput은 위험 상태가 일치하는 OK 결과에만 넣을 수 있어요")
         return self
 
 
