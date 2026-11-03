@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def _failed(reason: FailReason, latency_ms: int, cost_usd: float | None) -> InsightResponse:
     # cost_usd는 계약상 필수. 호출 오류 · 시간 초과처럼 모르면 0 (응답 필드 보강은 #10)
     return InsightResponse(validation=Validation.FAILED, draft=None, fail_reason=reason,
-                           latency_ms=latency_ms, cost_usd=cost_usd or 0.0)
+                           latency_ms=latency_ms, cost_usd=cost_usd or 0.0, prompt_version=PROMPT_VERSION)
 
 
 def generate_insight(inp: InsightInput, client: LLMClient) -> InsightResponse:
@@ -40,4 +40,4 @@ def generate_insight(inp: InsightInput, client: LLMClient) -> InsightResponse:
     if detail is not None:
         return _failed(FailReason.VALIDATION_FAILED, r.latency_ms, r.cost_usd)
     return InsightResponse(validation=Validation.PASSED, draft=text, fail_reason=None,
-                           latency_ms=r.latency_ms, cost_usd=r.cost_usd or 0.0)
+                           latency_ms=r.latency_ms, cost_usd=r.cost_usd or 0.0, prompt_version=PROMPT_VERSION)
