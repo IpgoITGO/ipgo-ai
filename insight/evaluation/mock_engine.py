@@ -5,8 +5,9 @@
 DA-04 산식과 DA-06 날짜별 재고 규칙(입고 후 출고, 미충족 수요 비이월)은 지키지만 수요와 위험은 단순화했다.
 본 실험에는 실제 엔진 결과를 쓴다.
 
-확인 필요(LOW_GRADE) 결과: 참조 구현에는 정확도 등급이 없다. 비율은 eval.yaml mock.low_grade_rate(기본 0, #54)이고,
-예상 출고량 범위를 만드는 규칙(DA-13)이 아직 없어 0보다 크게 두면 멈춘다.
+확인 필요(LOW_GRADE) 결과: 참조 구현에는 정확도 등급이 없고, 가짜 결과에는 넣지 않는다(#54 11/4 결정).
+넣을 비율의 근거가 없어서다. LOW_GRADE는 통합 시험 때 실제 계산 결과(DA-13 등급 · 경험 출고 범위, #64)로
+잰다(후속 Issue). 그래서 eval.yaml mock.low_grade_rate는 0만 받고, 0보다 크면 멈춘다.
 """
 
 import math
@@ -156,8 +157,8 @@ def mock_result(rng: random.Random, idx: int, base: date = date(2026, 9, 15)) ->
 def mock_bank(n: int, seed: int = 7, low_grade_rate: float = 0.0) -> list[EvalCase]:
     if low_grade_rate > 0:
         raise SystemExit(
-            "mock.low_grade_rate > 0: LOW_GRADE 예상 출고량 범위 규칙(DA-13)이 없어 "
-            "가짜 결과를 만들 수 없어요 (#54 확인 필요)"
+            "mock.low_grade_rate > 0: 가짜 결과에는 LOW_GRADE를 넣지 않아요. "
+            "LOW_GRADE는 실제 계산 결과로 재요 (#54 11/4 결정, make-bank --engine)"
         )
     rng = random.Random(seed)
     return [mock_result(rng, i) for i in range(n)]

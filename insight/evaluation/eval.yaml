@@ -12,7 +12,7 @@ offline_gate:                     # 사람 실험 전에 통과해야 하는 자
   max_fill_mismatch: 0            # 최종 표시 문장 중 숫자 대조(number_check_ok) 실패 건수
 
 mock:
-  low_grade_rate: 0.0             # 가짜 결과 중 LOW_GRADE 비율. #54 확인 필요 (DA-13 전이라 근거 없음). 0보다 크면 범위 규칙이 없어 멈춤
+  low_grade_rate: 0.0             # 가짜 결과 중 LOW_GRADE 비율. 0만 받음: LOW_GRADE는 실제 계산 결과로 잼 (#54 11/4 결정)
 
 judge:                            # LLM 판사 — 문장 의미 채점 (참고 지표, 관문 아님)
   model: gpt-5.6-sol              # #54. 환경변수 JUDGE_MODEL 이 우선

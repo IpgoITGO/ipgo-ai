@@ -23,7 +23,7 @@ class OfflineGate(BaseModel):
 
 
 class MockConfig(BaseModel):
-    low_grade_rate: float = 0.0  # 가짜 결과 중 LOW_GRADE 비율 (#54 확인 필요, DA-13 전이라 기본 0)
+    low_grade_rate: float = 0.0  # 가짜 결과 중 LOW_GRADE 비율. 0만 받음 (#54 11/4 결정, mock_engine.mock_bank)
 
 
 class JudgeConfig(BaseModel):
