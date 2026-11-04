@@ -6,6 +6,7 @@ CI는 실제 API를 부르지 않는다.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -201,6 +202,15 @@ def test_not_ok_results_do_not_call_llm(tmp_path):
 def test_stub_drafts_pass_real_validator(prepared):
     assert prepared["offline_report"]["validation_pass_rate"] == 1.0
     assert prepared["offline_report"]["final_text_number_mismatch"] == []
+
+
+def test_stub_comparison_keeps_ending_value(normal):
+    """시나리오 비교 문장에 잔여 재고 값 (#44 기준 구현 other_risk, #53 v0.6 예시와 같은 형태)."""
+    p = build_prompt(to_input(normal))
+    sents = json.loads(StubClient(bad_rate=0.0).complete(p.system, p.user).text)["sentences"]
+    comp = [s for s in sents if "_connect}}" in s]
+    want = re.compile(r"남는 재고는 \{\{ending_(p\d+)\}\}개로 \{\{dir_ending_\1_connect\}\}")
+    assert comp and all(want.search(s) for s in comp)
 
 
 def test_quiz_answer_keys(normal):

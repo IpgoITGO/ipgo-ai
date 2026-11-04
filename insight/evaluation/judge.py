@@ -381,6 +381,8 @@ def run_judge(
 ) -> list[dict]:
     basis_keys = basis_keys or ["forecast_outbound", "multiplier", "start_stock", "planned_receipts", "horizon_days"]
     rows = []
+    if log_path:
+        log_path.parent.mkdir(parents=True, exist_ok=True)  # bank.prepare와 같이 (#54 11/4)
     log = log_path.open("a", encoding="utf-8") if log_path else None
     try:
         for t in targets:

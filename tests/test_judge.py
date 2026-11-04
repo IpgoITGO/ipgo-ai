@@ -131,7 +131,7 @@ def test_report_and_review_roundtrip(normal, tmp_path):
         [verdict_json(J3="fail"), verdict_json(J3="fail"), verdict_json(), verdict_json()], model="gpt-5.6-sol"
     )
     targets = [_target(normal, "a"), Target("offline", normal.id, "0", "b", "{{qty_p100}}", normal)]
-    log = tmp_path / "judge_calls.jsonl"
+    log = tmp_path / "eval" / "judge_calls.jsonl"  # 폴더가 없어도 만든다 (#54 11/4)
     rows = run_judge(targets, client, runs=2, basis_keys=BASIS, log_path=log)
     assert len(log.read_text(encoding="utf-8").splitlines()) == 2
 

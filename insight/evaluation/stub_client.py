@@ -53,7 +53,8 @@ class StubClient:
             for k in alt:
                 if f"dir_risk_post_{k}_end" in keys:
                     sents.append(
-                        f"{{{{qty_{k}}}}}개로 {{{{action_{k}}}}} 남는 재고는 {{{{dir_ending_{k}_connect}}}} "
+                        f"{{{{qty_{k}}}}}개로 {{{{action_{k}}}}} 남는 재고는 {{{{ending_{k}}}}}개로 "
+                        f"{{{{dir_ending_{k}_connect}}}} "
                         f"품절 위험은 {{{{risk_post_{k}}}}}로 {{{{dir_risk_post_{k}_end}}}}."
                     )
                     break
