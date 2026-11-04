@@ -3,7 +3,7 @@
 - 관련 Issue: #4
 - 관련 요구사항: AI-01, AI-02, AI-05, AI-06, DA-11
 - 입력 기준: 계산 엔진 계약 `schemas/engine.py`의 `ProductResult` (PR #6), 자리 표시자 이름과 엔진 결정은 [0002](../decisions/0002-insight-contract.md) 3-4 · 3-8
-- 버전: prompt `prompt-2026.10.21-v0.4`에 3장 "값 포함 시" · "작성 예시" 규칙 추가 (#32 측정 근거). 코드는 `insight/prompt.py`의 `PROMPT_VERSION = prompt-2026.11.03-v0.6` (#43, #53: 3장 정상 · 판단 보류 예시에 잔여 재고 값, `no_date_receipts` 키 설명), template 2차: 6장을 Spring 구현용으로 정리 (#14, #24)
+- 버전: prompt `prompt-2026.10.21-v0.4`에 3장 "값 포함 시" · "작성 예시" 규칙 추가 (#32 측정 근거). 코드는 `insight/prompt.py`의 `PROMPT_VERSION = prompt-2026.11.03-v0.6` (#43, #53: 3장 정상 · 판단 보류 예시에 잔여 재고 값, `no_date_receipts` 키 설명, 셀러가 확인할 사항), template 2차: 6장을 Spring 구현용으로 정리 (#14, #24)
 
 계산 엔진(DA-11)이 만든 결과를 셀러가 빠르게 이해하도록 2~3문장으로 설명하는 규칙입니다. LLM은 숫자를 직접 쓰지 않고 자리 표시자만 씁니다. 실제 값은 나중에 채우고 대조합니다. LLM이 실패하거나 LLM을 쓰지 않는 경우에는 같은 자리 표시자를 쓰는 기본 문장을 보여 줍니다.
 
@@ -63,6 +63,7 @@ flowchart LR
 | 방향 | 비교 결과의 방향은 방향 자리 표시자로만 씀. 문장 중간은 `_connect`, 문장 끝은 `_end`. 값(줄지만 · 높아집니다 등)은 Spring이 채움(6-3) |
 | 위험 미산출 | 판단 보류는 "표본이 부족해 산출하지 않았습니다"라고만 씀. 정확도가 낮은 확인 필요 건은 위험을 말하지 않고 `{{forecast_range_low}}`~`{{forecast_range_high}}` 범위로만 설명 |
 | 작성 예시 | 상태마다 하나씩 둠(아래). 판단 보류 · 정확도 낮음 예시는 6장 "위험 없음" 조각으로 만들고, 위험(`risk_`) · 위험 방향(`dir_risk_post_`) 자리 표시자를 쓰지 않는다고 적음 |
+| 셀러가 확인할 사항 | 입력 메타데이터(#58) `startStockEstimated` · `hasNoDateReceipts`가 true이고 해당 키(`start_stock` · `as_of_date`, `no_date_receipts`)가 있으면 사용자 prompt에 "셀러가 확인할 사항(지침 4)" 줄 하나를 넣음. LLM은 그 괄호 글을 마지막 문장 끝 마침표 앞에 붙이고 문장 수는 늘리지 않음. 글은 6장 조각 8 · 7과 같은 뜻: `(현재 재고 {{start_stock}}개는 기준일 {{as_of_date}} 이후 출고를 예측한 추정값, 도착 예정일 없는 발주 {{no_date_receipts}}개는 계산에 넣지 않음)`(해당하는 것만). 1장 "확인 필요" 조건이며 검사기 필수 키는 아님. 기존 요청의 기본값(false)은 근거로 쓰지 않음(0002 4장). 산식 대체(`methodFallback`)는 1장 조건이 아니라 넣지 않고 기존 "적용 산식 … (사유 있음 → {{method_reason}})" 줄을 그대로 씀 (#53) |
 | 키가 빠진 입력 | 작성 예시의 키가 목록에 없거나 시나리오 방향 키가 없으면, 사용자 prompt에 "※ 이번 목록에 없는 자리 표시자 … 빼고 씀", "※ 방향 자리 표시자가 없는 비교 … 다른 시나리오의 방향 키로 대신하지 않음"을 덧붙임. 키가 다 있으면 붙이지 않음 (#43) |
 | 출력 형식 | JSON 하나: `{"sentences": ["문장1", "문장2"]}`. 배열 원소 하나에 문장 하나. 줄바꿈·마크다운·따옴표 없음 |
 
@@ -156,7 +157,7 @@ prompt에는 입력 상태에 맞는 예시 하나를 따르라고 적고 세 �
 | `LOW_GRADE` | `qty_p100` · `ending_p100` · `method` · `qty_p80` · `forecast_range_low` · `forecast_range_high` | `ending_p80_vs_p100` |
 
 - `P80`이 권장량과 같아 중복(`isDuplicate = true`)이면 `p80` 키와 방향은 빠져도 됩니다. 이때 FastAPI는 "이번 목록에 없음" 안내를 붙입니다(3장 "키가 빠진 입력").
-- 팀 테스트 예시 `INSIGHT_REQUEST`(`tests/payloads.py`)에는 `method` · `risk_sample_size`가 없어 이 기준보다 키가 적습니다. 계약 반영(#10) 때 이 기준에 맞추기를 제안합니다.
+- 팀 테스트 예시 `INSIGHT_REQUEST`(`tests/payloads.py`)와 mock calculate의 `insightInput`은 계약 반영(#10, PR #58)에서 이 기준에 맞췄습니다. 계산 결과에서 입력을 만드는 `to_insight_input`(#36, PR #59)도 이 표의 키와 `directions`를 만듭니다(#53에서 #44 fixture 계산 결과 5종으로 확인).
 
 ## 6. 상태별 기본 문장 template
 
@@ -281,7 +282,7 @@ prompt에는 입력 상태에 맞는 예시 하나를 따르라고 적고 세 �
 
 | 항목 | 내용 | 다음 단계 |
 |---|---|---|
-| 팀 테스트 예시 키 | `tests/payloads.py`의 `INSIGHT_REQUEST`가 5-1 최소 키보다 적음 | #10에 제안 |
+| 확인 필요 사례의 `format` 실패 | `LOW_GRADE` 사례에서 배열 원소 하나에 두 문장을 넣어 실패함. v0.5부터 있었고 #53 v0.6 시험에서도 남음 | CM-04(#54) 측정 결과를 보고 다룸 (#53 범위 결정) |
 
 ### 정해서 반영한 것
 
@@ -289,7 +290,8 @@ prompt에는 입력 상태에 맞는 예시 하나를 따르라고 적고 세 �
 - 도착 예정일 없는 발주: Spring이 `noDateReceipts`로 보냄(답변 4). 1장 확인 필요 조건과 6장 미반영 물량 조각에 반영했습니다.
 - 입력 계약: Spring이 `insightInput`을 저장해 그대로 보냄(답변 1). 스키마 반영은 #10입니다.
 - `NOT_NEEDED`에 직접 입력이 있어도 LLM을 부르지 않음(1장, 답변 5).
-- prompt 보강(#53, `prompt-2026.11.03-v0.6`): `KEY_DESCRIPTIONS`에 `no_date_receipts` 설명을 넣고, 3장 정상 · 판단 보류 예시가 `{{ending_p80}}`을 쓰게 했습니다(6장 기본 문장과 같은 "남는 재고는 {{ending_X}}개로" 형태). 5-1 표에 `ending_p80`을 더했습니다.
+- 팀 테스트 예시 키: `INSIGHT_REQUEST`를 5-1 기준에 맞춤 (#10, PR #58).
+- prompt 보강(#53, `prompt-2026.11.03-v0.6`): `KEY_DESCRIPTIONS`에 `no_date_receipts` 설명을 넣고, 3장 정상 · 판단 보류 예시가 `{{ending_p80}}`을 쓰게 했습니다(6장 기본 문장과 같은 "남는 재고는 {{ending_X}}개로" 형태). 5-1 표에 `ending_p80`을 더했습니다. #58 메타데이터 중 시작 재고 추정 · 도착 예정일 없는 발주를 "셀러가 확인할 사항"으로 문장에 넣게 했습니다(3장, 0002 4장 "AI 담당 작업과 조율").
 - 문장 수: 2~3문장(`insight/validator.py`, #31). 참조 구현의 2~5문장은 쓰지 않습니다.
 - 금지 어휘 "낮춰요" · "올라가요": 검사 목록에 넣었습니다(#31).
 - 소수 표시: Spring 비교표 규칙(6-4).

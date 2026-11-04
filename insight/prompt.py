@@ -14,7 +14,7 @@ from insight.validator import MAX_SENTENCES, MIN_SENTENCES, PLACEHOLDER_RE
 from schemas.base import RiskStatus
 from schemas.insight import InsightInput
 
-PROMPT_VERSION = "prompt-2026.11.03-v0.6"  # v0.5 + 정상 · 판단 보류 예시 잔여 재고 값, no_date_receipts 설명 (#53)
+PROMPT_VERSION = "prompt-2026.11.03-v0.6"  # v0.5 + 예시 잔여 재고 값, no_date_receipts 설명, 셀러가 확인할 사항 (#53)
 SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encoding="utf-8").rstrip("\n")
 
 SCENARIOS = ("p80", "p100", "p120", "custom")  # 계약 ScenarioType을 소문자로 (#4 문서 5장)
@@ -175,6 +175,15 @@ def build_prompt(inp: InsightInput) -> Prompt:
         lines.append("적용 산식: {{method}}" + reason)
     if "planned_receipts" in keys:
         lines.append("기존 발주 물량(도착 예정): {{planned_receipts}}")
+    # #58 메타데이터 → 지침 4 "셀러가 확인할 사항"(#4 문서 1장 확인 필요, 6장 조각 8 · 7).
+    # 기존 요청의 기본값(false)은 근거로 쓰지 않는다(0002 4장). 검사기 필수 키는 바꾸지 않는다.
+    checks = []
+    if inp.start_stock_estimated and {"start_stock", "as_of_date"} <= keys:
+        checks.append("현재 재고 {{start_stock}}개는 기준일 {{as_of_date}} 이후 출고를 예측한 추정값")
+    if inp.has_no_date_receipts and "no_date_receipts" in keys:
+        checks.append("도착 예정일 없는 발주 {{no_date_receipts}}개는 계산에 넣지 않음")
+    if checks:  # 둘 다면 한 괄호로 (따로 주면 두 번째를 빠뜨림, 11/4 시험)
+        lines.append("셀러가 확인할 사항(지침 4) — 마지막 문장 끝 마침표 앞에 덧붙일 글: (" + ", ".join(checks) + ")")
     if risk:
         lines.append("도착 전 품절 위험(공통): 산출됨 → {{risk_pre}}")
         if "risk_sample_size" in keys:
