@@ -6,6 +6,7 @@ CALC_REQUEST = {
     "policy": {"defaultMethod": "A", "multiplier": 1.05},
     "settings": [{"productId": 101, "leadTimeDays": 5, "reviewCycleDays": 29, "orderUnitQty": 12, "unitCost": 1800}],
     "plannedReceipts": [{"productId": 101, "quantity": 120, "expectedOn": "2026-12-01"}],
+    "noDateReceipts": [],
 }
 
 CLEAN_REQUEST = {
@@ -27,9 +28,14 @@ INSIGHT_REQUEST = {
     "resultId": 9001,
     "input": {
         "skuLabel": "상품 A", "recommended": "P100",
-        "placeholders": ["qty_p80", "qty_p100", "qty_p120", "ending_p100",
-                         "risk_post_p80", "risk_post_p100", "risk_pre"],
-        "directions": {"risk_post_p80_vs_p100": "높음", "ending_p120_vs_p100": "높음"},
+        "scenarios": ["P80", "P100", "P120"], "methodFallback": False,
+        "startStockEstimated": False, "hasNoDateReceipts": False,
+        "placeholders": ["method", "horizon_days", "forecast_outbound", "multiplier", "start_stock",
+                         "planned_receipts", "qty_p80", "ending_p80", "risk_post_p80",
+                         "qty_p100", "ending_p100", "risk_post_p100", "qty_p120", "ending_p120",
+                         "risk_post_p120", "risk_pre", "risk_sample_size"],
+        "directions": {"ending_p80_vs_p100": "낮음", "risk_post_p80_vs_p100": "높음",
+                       "ending_p120_vs_p100": "높음", "risk_post_p120_vs_p100": "낮음"},
         "riskStatus": "OK",
     },
 }

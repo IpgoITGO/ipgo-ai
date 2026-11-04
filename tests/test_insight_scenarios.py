@@ -52,7 +52,7 @@ def test_s1_passed_returns_placeholder_draft(real_client):
         (FakeClient([LLMTimeout("slow", 10000)]), "LLM_TIMEOUT"),                          # s2
         (FakeClient([LLMError("down", 80)]), "LLM_ERROR"),                                 # s3
         (FakeClient([DRAFT.replace("추정치로", "추정치로 적절한")]), "VALIDATION_FAILED"),  # s4 금지 어휘
-        (FakeClient([DRAFT.replace("{{risk_basis}}", "{{method}}")]), "VALIDATION_FAILED"),  # s4 목록에 없는 키
+        (FakeClient([DRAFT.replace("{{risk_basis}}", "{{not_in_input}}")]), "VALIDATION_FAILED"),  # s4 목록에 없는 키
     ],
     ids=["s2_timeout", "s3_call_error", "s4_banned_word", "s4_unknown_key"],
 )

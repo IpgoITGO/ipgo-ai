@@ -1,15 +1,27 @@
 {
-  "engineVersion": "0.1.0-mock",
+  "engineVersion": "0.4.0-mock",
   "results": [
     {
       "productId": 101, "status": "OK", "reason": null,
-      "method": "A", "methodReason": "평가 결과 기본 방식", "multiplier": 1.05, "horizonDays": 34,
+      "method": "A", "methodReason": "평가 결과 기본 방식", "methodFallback": false, "multiplier": 1.05, "horizonDays": 34,
       "forecastOutboundQty": 101.2, "startStockQty": 39.6, "startStockEstimated": true,
       "plannedReceiptsInHorizon": 0, "preArrivalUnmetQty": 0, "requiredQtyBeforeRounding": 66.66,
       "recommendedQty": 72, "recommendedAmount": 129600, "expectedShortageOn": "2026-10-22",
-      "preArrivalRisk": 0.04, "riskSampleSize": 38, "riskStatus": "OK",
+      "preArrivalRisk": 0.04, "riskSampleSize": 38, "riskStatus": "OK", "riskBasis": "SKU", "noDateReceiptQty": 0,
       "accuracyGrade": "HIGH", "validObservationDays": 412, "coverSuccessCount": 9, "coverTrialCount": 10,
       "forecastErrorRate": 0.12, "forecastRangeLow": null, "forecastRangeHigh": null,
+      "insightInput": {
+        "skuLabel": "상품 A", "recommended": "P100", "riskStatus": "OK",
+        "scenarios": ["P80", "P100", "P120"], "methodFallback": false,
+        "startStockEstimated": true, "hasNoDateReceipts": false,
+        "placeholders": ["as_of_date", "horizon_days", "start_stock", "planned_receipts", "method",
+                         "forecast_outbound", "multiplier", "risk_pre", "risk_sample_size",
+                         "qty_p80", "ending_p80", "depletion_p80", "unmet_p80", "risk_post_p80",
+                         "qty_p100", "ending_p100", "unmet_p100", "risk_post_p100",
+                         "qty_p120", "ending_p120", "unmet_p120", "risk_post_p120"],
+        "directions": {"ending_p80_vs_p100": "낮음", "risk_post_p80_vs_p100": "높음",
+                       "ending_p120_vs_p100": "높음", "risk_post_p120_vs_p100": "낮음"}
+      },
       "scenarios": [
         {"type": "P80", "qty": 60, "isDuplicate": false, "expectedDepletionOn": "2026-11-18",
          "expectedEndingStock": 0, "unmetDemandQty": 5.8, "postArrivalRisk": 0.25,

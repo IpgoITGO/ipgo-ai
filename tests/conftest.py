@@ -13,4 +13,5 @@ def client(monkeypatch):
     monkeypatch.delenv("IPGO_UPLOAD_BUCKET", raising=False)
     monkeypatch.delenv("IPGO_JOBS_QUEUE_URL", raising=False)
     monkeypatch.delenv("IPGO_RESULTS_QUEUE_URL", raising=False)
+    monkeypatch.setenv("IPGO_RISK_ENABLED", "true")
     return TestClient(app, raise_server_exceptions=False)

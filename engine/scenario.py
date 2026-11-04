@@ -1,5 +1,8 @@
 """DA-06 시나리오 시뮬레이션 · DA-07 품절 위험 추정."""
 from dataclasses import dataclass
+from math import isfinite
+
+from engine.replenish import start_stock
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,61 @@ def simulate(
     )
 
 
-def stockout_risk(error_ratios: list[float], min_samples: int) -> float | None:
-    """5~7월 예측 오차 비율을 시나리오에 적용해 재고 부족 비율을 낸다. 표본 부족이면 None."""
-    raise NotImplementedError("DA-07 stockout_risk")
+@dataclass(frozen=True)
+class StockoutRisk:
+    pre_arrival_risk: float | None
+    post_arrival_risk: float | None
+    sample_size: int
+
+
+class RiskInputError(ValueError):
+    """표본 부족과 구별해야 하는 잘못된 위험 계산 입력."""
+
+
+def _quantity(value: float) -> bool:
+    try:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
+def stockout_risk(
+    error_ratios: tuple[float, ...], min_samples: int, *, as_of_closing: float,
+    daily_forecast: float, gap_days: int, horizon_days: int, order_qty: int, lead_time_days: int,
+    gap_receipts: dict[int, float], planned_receipts: dict[int, float],
+) -> StockoutRisk:
+    """고정한 입고량(개)에 비율 r=실적/예측을 재적용한 도착 전/후 위험(0~1).
+
+    각 r마다 일 출고(개/일)×r로 g일 시작 재고를 다시 구하고 H일 DA06을 실행한다.
+    pre = count(s+1..s+L-1 미충족>0)/N, post = count(s+L..s+H 미충족>0)/N.
+    입고량·도착일·기준일 재고는 고정한다. 기말0만으로 위험 사건을 세지 않는다.
+    표본 선택은 engine.risk 책임이며, 부족하면 두 위험 모두 None이다.
+    """
+    integers = [(min_samples, 1), (gap_days, 0), (horizon_days, 1), (order_qty, 0), (lead_time_days, 1)]
+    if (any(type(v) is not int or v < lower for v, lower in integers)
+            or lead_time_days > horizon_days or not _quantity(as_of_closing) or not _quantity(daily_forecast)
+            or not _quantity(order_qty)):
+        raise RiskInputError("표본 기준·기간·재고·예측·입고량을 확인해 주세요")
+    for receipts, length in [(gap_receipts, gap_days), (planned_receipts, horizon_days)]:
+        if (not isinstance(receipts, dict) or any(
+            type(k) is not int or not 1 <= k <= length or not _quantity(q) for k, q in receipts.items()
+        )):
+            raise RiskInputError("기존 발주는 해당 기간 안의 도착일과 유한한 비음수 수량이 필요해요")
+    if any(not _quantity(r) for r in error_ratios):
+        raise RiskInputError("오차 비율은 유한한 비음수여야 해요")
+    count = len(error_ratios)
+    if count < min_samples:
+        return StockoutRisk(None, None, count)
+    pre, post = 0, 0
+    for ratio in error_ratios:
+        demand = daily_forecast * ratio
+        if not isfinite(demand):
+            raise RiskInputError("비율을 적용한 예측이 유한한 범위를 넘었어요")
+        stock = start_stock(as_of_closing, demand, gap_days, gap_receipts)
+        replay = simulate(stock, [demand] * horizon_days, order_qty, lead_time_days, planned_receipts)
+        if (not isfinite(stock) or not all(isfinite(v) for v in replay.daily_closing + replay.daily_unmet)
+                or not isfinite(replay.unmet_demand)):
+            raise RiskInputError("재적용한 재고·미충족 수요가 유한한 범위를 넘었어요")
+        pre += replay.pre_arrival_unmet > 0
+        post += replay.post_arrival_unmet > 0
+    return StockoutRisk(pre / count, post / count, count)

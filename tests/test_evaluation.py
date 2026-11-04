@@ -1,217 +1,250 @@
-"""CM-04 효과 평가 1단계 (#54). 참조 구현 tests/test_evaluation.py 중 1단계 테스트를 0002 · 서비스 경로로 옮겼다.
-
-2단계(역균형 · 실험 서버 · 시뮬레이션 · 채택 규칙 · 잠금) 테스트는 #54 제외 범위라 옮기지 않았다.
-CI는 실제 API를 부르지 않는다.
-기대값은 참조 구현 samples/의 값이다 (이석형 확인).
-"""
-
+"""합성 데이터의 항등식·불변성 검증. 사람이 승인한 숫자 fixture는 변경하지 않는다."""
+import base64
+import gzip
+import hashlib
 import json
-from pathlib import Path
+from datetime import date, timedelta
 
+import pandas as pd
 import pytest
 
-from insight.evaluation.bank import experiment_candidate, for_experiment, make_bank, prepare
-from insight.evaluation.cases import EvalCase, all_values, from_reference, to_input, verify_filled
-from insight.evaluation.config import load_config
-from insight.evaluation.mock_engine import mock_bank
-from insight.evaluation.quiz import make_questions
-from insight.evaluation.stub_client import StubClient
-from insight.evaluation.table import render_table
-from insight.llm import FakeClient
-from insight.prompt import SYSTEM_PROMPT, build_prompt
-from schemas.base import ResultStatus, RiskStatus, ScenarioType
-
-SAMPLES = Path(__file__).resolve().parents[1] / "insight" / "evaluation" / "samples"
-CFG = load_config()
-# system prompt (가) 정상 예시 그대로 (참조 구현 conftest GOOD_NORMAL은 4문장이라 저장소 규칙 2~3문장에 맞지 않음)
-GOOD_NORMAL = next(ln for ln in SYSTEM_PROMPT.splitlines() if ln.startswith('{"sentences"'))
+from app.jobs import JobStatus, JobType, ResultEnvelope
+from app.result_transport import MAX_RESULT_BYTES, encode_result
+from app.worker import process_message
+from engine.accuracy import empirical_range, grade
+from engine.backtest import generate_error_samples, run_backtest
+from engine.calculate import CalculationInputError
+from engine.evaluation import choose_multiplier, errors
+from schemas.base import AccuracyGrade
+from schemas.engine import BacktestRequest, MultiplierMetric, Period, ProductSettings
 
 
-def _case(name: str) -> EvalCase:
-    return EvalCase.model_validate(json.loads((SAMPLES / f"{name}.json").read_text(encoding="utf-8")))
+def dataset(products=(1,)):
+    # 동일 출고·입고, 일정 재고의 항등식. 실제 고객 데이터가 아니다.
+    days = (date(2026, 10, 14) - date(2025, 1, 1)).days + 1
+    return pd.DataFrame([dict(product_id=p, upload_file_id=1, stock_date=date(2025, 1, 1)+timedelta(days=k),
+                              opening_qty=5, inbound_qty=1, outbound_qty=1, adjustment_qty=0,
+                              closing_qty=5, is_valid_observation=True)
+                         for p in products for k in range(days)])
 
 
-@pytest.fixture
-def normal():
-    return _case("normal")
+def request(products=(1,)):
+    return BacktestRequest(user_id=1, warehouse_id=1, upload_file_ids=[1],
+        tune_period=Period(start=date(2026, 5, 1), end=date(2026, 7, 31)),
+        test_period=Period(start=date(2026, 8, 1), end=date(2026, 10, 14)),
+        settings=[ProductSettings(product_id=p, lead_time_days=2, review_cycle_days=8,
+                                  order_unit_qty=1, unit_cost=1) for p in products])
 
 
-def _bank(c: EvalCase) -> dict:
-    return {
-        "all_results": [c.model_dump(mode="json", by_alias=True)],
-        "results": [for_experiment(c).model_dump(mode="json", by_alias=True)],
-        "sets": {"0": [], "1": [], "2": []},
-        "practice": [c.id],
-    }
+@pytest.mark.parametrize("days,rate,expected", [
+    (6,1,None),(7,None,AccuracyGrade.LOW),(13,1,AccuracyGrade.LOW),(14,1,AccuracyGrade.MEDIUM),
+    (27,1,AccuracyGrade.MEDIUM),(28,None,AccuracyGrade.MEDIUM),
+    (28,.89,AccuracyGrade.MEDIUM),(28,.9,AccuracyGrade.HIGH),
+])
+def test_grade_contract_boundaries(days, rate, expected):
+    assert grade(days, rate) == expected
 
 
-@pytest.fixture(scope="module")
-def prepared(tmp_path_factory):
-    bank = make_bank(mock_bank(40, seed=7), CFG, "mock")
-    return prepare(bank, CFG, StubClient(bad_rate=0.0), tmp_path_factory.mktemp("p") / "calls.jsonl")
+def test_constant_ratio_range_and_scale_equivariance():
+    low, high = empirical_range(10, (1.,)*20)
+    assert low == high == 10  # r=1이면 예측과 같은 항등식
+    assert empirical_range(20, (.5,1.,2.)) == tuple(2*q for q in empirical_range(10, (.5,1.,2.)))
 
 
-# --- 0002 형식 변환 ---------------------------------------------------------------------------
+def test_zero_error_identity_and_no_denominator():
+    batch = generate_error_samples(dataset(), origins=[date(2026,5,1)], horizon_days=10,
+        period=request().tune_period, period_name="TUNE", observed_through=date(2026,7,31))
+    assert errors(list(batch.samples)) == (0.,0.)  # 상수 출고의 동일 예측
+    assert errors([]) == (None,None)
 
 
-def test_samples_are_reference_values_in_0002_names(normal):
-    r = normal.result
-    assert r.status == ResultStatus.OK and r.risk_status == RiskStatus.OK
-    assert r.recommended_qty == 290 and r.forecast_outbound_qty == 410 and r.pre_arrival_risk == 0.05
-    assert [s.type for s in r.scenarios] == [
-        ScenarioType.P80,
-        ScenarioType.P100,
-        ScenarioType.P120,
-        ScenarioType.CUSTOM,
-    ]
-    assert _case("no_restock").result.status == ResultStatus.NOT_NEEDED
-    assert _case("cannot_compute").result.status == ResultStatus.NOT_CALCULABLE
-    low = _case("low_sample")
-    assert (
-        low.result.risk_status == RiskStatus.INSUFFICIENT_SAMPLE and low.method_fallback and low.risk_basis == "POOLED"
-    )
+def test_target_miss_uses_best_rate_then_smallest_multiplier():
+    metrics = [MultiplierMetric(multiplier=m, cover_success_rate=.5, excess_rate=0, meets_target=False)
+               for m in (1.15,1.,1.05)]
+    assert choose_multiplier(metrics).multiplier == min(m.multiplier for m in metrics)
+    metrics[0].cover_success_rate = .8
+    assert choose_multiplier(metrics) is metrics[0]
 
 
-def test_input_builds_service_prompt(normal):
-    p = build_prompt(to_input(normal))
-    assert p.required == ["qty_p100", "risk_post_p100", "risk_pre"]
-    assert "[값:" not in p.user  # 서비스와 같이 이름만 보낸다
+def test_test_changes_never_change_tune_selection_or_accuracy():
+    daily = dataset()
+    original = daily.copy(deep=True)
+    first = run_backtest(request(), daily)
+    changed = daily.copy()
+    test = changed.stock_date >= date(2026,8,1)
+    # 미래 실적만 바꾸며 재고 항등식은 유지한다.
+    changed.loc[test, ["outbound_qty", "inbound_qty"]] = 2
+    second = run_backtest(request(), changed)
+    assert (first.selected_method, first.selected_multiplier, first.target_met) == (
+        second.selected_method, second.selected_multiplier, second.target_met)
+    assert first.multiplier_metrics == second.multiplier_metrics
+    assert first.sku_accuracy == second.sku_accuracy
+    assert first.method_errors[:2] == second.method_errors[:2]
+    assert first.method_errors[2:] != second.method_errors[2:]
+    assert all(h.origin_date.month in (5,6,7) for a in first.sku_accuracy for h in a.history)
+    pd.testing.assert_frame_equal(daily, original)
 
 
-def test_verify_filled_catches_foreign_numbers():
-    values = {"qty_p100": "290", "risk_pre": "5%"}
-    assert verify_filled("권장 290개, 위험 5%.", values) == (True, None)
-    assert verify_filled("권장 300개.", values)[0] is False
-    assert verify_filled("권장 {{qty_p100}}개.", values)[0] is False
+def test_no_samples_are_null_and_not_false_success():
+    daily = dataset().assign(is_valid_observation=False)
+    response = run_backtest(request(), daily)
+    assert response.selected_multiplier is None and not response.target_met
+    assert all(m.mae is None and m.wape is None for m in response.method_errors)
+    assert all(m.cover_success_rate is None and not m.meets_target for m in response.multiplier_metrics)
+    assert response.scenario_reliability.ending_stock_mae is None
+    assert all(b.actual_stockout_rate is None for b in response.scenario_reliability.risk_buckets)
 
 
-def test_mock_low_grade_needs_range_rule():
-    with pytest.raises(SystemExit):
-        mock_bank(5, low_grade_rate=0.2)
-    assert all(c.result.risk_status != RiskStatus.LOW_GRADE for c in mock_bank(5))
+def test_missing_settings_is_invalid_http_and_worker(client, monkeypatch):
+    monkeypatch.setenv("ENGINE_MODE", "real")
+    monkeypatch.setattr("app.repository.load_product_daily", lambda *_a, **_k: dataset())
+    req = request().model_copy(update={"settings": []})
+    with pytest.raises(CalculationInputError):
+        run_backtest(req, dataset())
+    response = client.post("/engine/backtest", json=req.to_json_dict())
+    assert response.status_code == 422 and response.json()["code"] == "INVALID_INPUT"
+    job = dict(contractVersion="1",jobId="backtest",jobType="BACKTEST",payload=req.to_json_dict())
+    assert process_message(json.dumps(job)).error.code == "INVALID_INPUT"
 
 
-def test_from_reference_maps_duplicate_and_pending():
-    c = from_reference(
-        {
-            "calc_id": "x",
-            "sku": {"barcode": "1"},
-            "base_date": "2026-06-15",
-            "status": "NORMAL",
-            "inputs": {
-                "cover_days": 34,
-                "current_stock": 10,
-                "pending_orders": [{"qty": 5}, {"qty": 7}],
-                "unreflected_pending_qty": 3,
-            },
-            "forecast": {"method": "A", "cover_demand": 40, "multiplier": 1.05},
-            "recommendation": {"qty": 50},
-            "stockout_risk_before_arrival": {"computed": True, "risk": 0.1, "sample_size": 40},
-            "scenarios": [
-                {
-                    "key": "s80",
-                    "qty": 50,
-                    "remaining_at_next_restock": 20,
-                    "duplicate_of": "s100",
-                    "stockout_risk_after_arrival": {"computed": True, "risk": 0.06},
-                },
-                {
-                    "key": "s100",
-                    "qty": 50,
-                    "remaining_at_next_restock": 20,
-                    "stockout_risk_after_arrival": {"computed": True, "risk": 0.06},
-                },
-            ],
-        }
-    )
-    assert c.result.planned_receipts_in_horizon == 12 and c.no_date_receipt_qty == 3
-    assert c.scenario(ScenarioType.P80).is_duplicate and not c.method_fallback
+def test_backtest_http_sqs_equal_and_real_llm_absent(client, monkeypatch):
+    monkeypatch.setenv("ENGINE_MODE", "real")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("app.repository.load_product_daily", lambda *_a, **_k: dataset())
+    response = client.post("/engine/backtest", json=request().to_json_dict())
+    job = dict(contractVersion="1",jobId="backtest",jobType="BACKTEST",payload=request().to_json_dict())
+    result = process_message(json.dumps(job))
+    assert response.status_code == 200 and result.status == JobStatus.SUCCEEDED
+    assert response.json() == result.result
 
 
-
-def test_display_rules_follow_server(normal):
-    """소수 재고 · 수요는 서버 DisplayQuantities와 같게 보인다 (#49 f80e67b).
-
-    재고 내림, 예상 출고량 · 미충족 수요 올림.
-    """
-    r = normal.result
-    p80, p100 = r.scenarios[0], r.scenarios[1]
-    frac = normal.model_copy(update={"result": r.model_copy(update={
-        "forecast_outbound_qty": 409.2, "start_stock_qty": 120.9,
-        "scenarios": [p80.model_copy(update={"expected_ending_stock": 19.9, "unmet_demand_qty": 0.2}),
-                      p100.model_copy(update={"expected_ending_stock": 19.1})] + r.scenarios[2:]})})
-    facts = dict(render_table(for_experiment(frac))["facts"])
-    assert facts["커버 기간 예상 출고"] == "410개" and facts["현재 재고"] == "120개"
-    v = all_values(frac)
-    assert v["ending_p80"] == "19" and v["unmet_p80"] == "1"
-    assert to_input(frac).directions["ending_p80_vs_p100"] == "같음"  # 둘 다 19개로 보임
-
-# --- 실험 대상 선정 (참조 구현 test_candidate_rules · test_table_matches_engine_values) -----------
+def test_large_transport_is_lossless_bounded_and_deterministic():
+    result = ResultEnvelope(job_id="fake", job_type=JobType.CLEAN, status=JobStatus.SUCCEEDED,
+                            result={"fake": "가"*400_000})
+    body = encode_result(result)
+    assert len(body.encode()) < MAX_RESULT_BYTES and body == encode_result(result)
+    outer = json.loads(body)
+    raw = gzip.decompress(base64.b64decode(outer["payload"],validate=True))
+    assert len(raw) == outer["uncompressedBytes"]
+    assert hashlib.sha256(raw).hexdigest() == outer["sha256"]
+    assert json.loads(raw) == result.to_json_dict()
 
 
-def test_candidate_rules(normal):
-    assert experiment_candidate(normal)[0] and experiment_candidate(_case("pooled"))[0]
-    assert "중복" in experiment_candidate(_case("duplicate"))[1]
-    assert "미산출" in experiment_candidate(_case("low_sample"))[1]
-    assert not experiment_candidate(_case("no_restock"))[0] and not experiment_candidate(_case("cannot_compute"))[0]
-    # 실험 화면은 직접 입력(custom)을 빼고 80 · 100 · 120%만
-    assert [s.type for s in for_experiment(normal).result.scenarios] == [
-        ScenarioType.P80,
-        ScenarioType.P100,
-        ScenarioType.P120,
-    ]
+def test_reliability_has_empirical_counts_without_claiming_confidence():
+    # SKU별12건 미만이지만 동일 H·산식의 pooled는20건 이상이다.
+    response = run_backtest(request((1,2,3)), dataset((1,2,3)))
+    buckets = response.scenario_reliability.risk_buckets
+    assert sum(b.cases for b in buckets) > 0
+    for bucket in buckets:
+        if bucket.cases < 20:
+            assert bucket.actual_stockout_rate is None
+        else:
+            assert 0 <= bucket.actual_stockout_rate <= 1
+    # 출고가 변하지 않는 항등식에서는 예상/관측 기말도 같다.
+    assert response.scenario_reliability.ending_stock_mae == 0
 
 
-def test_table_matches_engine_values(normal):
-    t = render_table(for_experiment(normal))
-    facts = dict(t["facts"])
-    assert facts["권장 입고량"] == "290개" and facts["커버 기간 예상 출고"] == "410개"
-    assert facts["도착 전 품절 위험 (모든 시나리오 공통)"] == "5% (표본 42건)"
-    assert t["rows"][0] == ["80%", "240개", "7월 12일", "0개", "25%"]
+def test_daily_future_duplicates_do_not_contaminate_prior_origin_samples():
+    daily = dataset()
+    origin = date(2026,5,1)
+    args=dict(origins=[origin],horizon_days=10,period=request().tune_period,period_name="TUNE",
+              observed_through=date(2026,7,31))
+    first = generate_error_samples(daily, **args)
+    later = daily[daily.stock_date == date(2026,9,1)]
+    second = generate_error_samples(pd.concat([daily,later],ignore_index=True), **args)
+    assert first == second
 
 
-# --- 문장 준비: 서비스 경로 그대로 (참조 구현은 InsightService) ------------------------------------
+def test_oversized_decoded_result_is_rejected_before_publication(monkeypatch):
+    import app.result_transport as transport
+    monkeypatch.setattr(transport, "MAX_DECODED_BYTES", 100)
+    result = ResultEnvelope(job_id="fake", job_type=JobType.CLEAN,status=JobStatus.SUCCEEDED,
+                            result={"fake":"가"*400})
+    with pytest.raises(ValueError):
+        transport.encode_result(result)
 
 
-def test_prepare_uses_service_outputs(normal, tmp_path):
-    p = prepare(_bank(normal), CFG, FakeClient([GOOD_NORMAL, GOOD_NORMAL]), tmp_path / "c.jsonl")
-    item = p["items"][normal.id]
-    assert item["llm_source"] == "llm" and "290개" in item["llm_text"] and item["fixed_text"] != item["llm_text"]
-    assert p["versions"]["prompt"].startswith("prompt-") and p["versions"]["model"] == "fake-model"
-    assert p["offline_report"]["validation_pass_rate"] == 1.0
+def test_method_selection_uses_paired_cases_not_different_sku_populations():
+    from dataclasses import replace
+
+    from engine.evaluation import choose_method
+    batch = generate_error_samples(dataset(),origins=[date(2026,5,1)],horizon_days=10,
+        period=request().tune_period,period_name="TUNE",observed_through=date(2026,7,31))
+    a, b = batch.samples
+    assert a.method.value == "A" and b.method.value == "B"
+    # A 정확 예측, B 과다 예측이면 동일 사례에서 A 우세.
+    worse_b = replace(b, forecast_qty=b.forecast_qty*2,error_qty=-b.actual_qty)
+    assert choose_method([a,worse_b])[0].value == "A"
+    worse_a = replace(a, forecast_qty=a.forecast_qty*2,error_qty=-a.actual_qty)
+    assert choose_method([worse_a,worse_b])[0].value == "B"
+    assert choose_method([a,replace(worse_b, product_id=2)])[0].value == "B"
 
 
-def test_failed_draft_becomes_fallback_in_llm_condition(normal, tmp_path):
-    bad = '{"sentences": ["권장 입고량은 290개입니다.", "가장 적절합니다."]}'
-    p = prepare(_bank(normal), CFG, FakeClient([bad, bad]), tmp_path / "c.jsonl")
-    item = p["items"][normal.id]
-    assert item["llm_source"] == "fixed_fallback" and item["llm_text"] == item["fixed_text"]
-    assert item["llm_reason_code"] == "raw_number"
-    assert p["offline_report"]["gate"]["passed"] is False
+def test_multi_horizon_prefix_reuse_matches_independent_generation_with_future_poison():
+    from engine.backtest import generate_error_sample_batches
+    daily=dataset((1,2))
+    plans=[dict(origins=[date(2026,5,1),date(2026,5,8)],horizon_days=h,
+                period=request().tune_period,period_name="TUNE",observed_through=date(2026,7,31),product_ids=[1,2])
+           for h in (10,34)]
+    for source in [daily, daily.assign(outbound_qty=daily.outbound_qty.where(daily.stock_date<date(2026,7,1),-1))]:
+        independent=tuple(generate_error_samples(source,**plan) for plan in plans)
+        assert generate_error_sample_batches(source,plans) == independent
 
 
-def test_not_ok_results_do_not_call_llm(tmp_path):
-    c = _case("no_restock")
-    bank = {"all_results": [c.model_dump(mode="json", by_alias=True)], "results": [], "sets": {}, "practice": []}
-    client = FakeClient()
-    p = prepare(bank, CFG, client, tmp_path / "c.jsonl")
-    assert client.calls == [] and p["offline_report"]["n_skipped_fixed"] == 1  # Spring은 OK 결과만 부른다 (#24)
+def test_repository_capacity_rejects_before_building_dataframe_and_rolls_back(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import repository
+    class TooMany:
+        def __len__(self): return 150_001
+        def __iter__(self): pytest.fail("상한 초과 자료를 DataFrame으로 만들면 안 됨")
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self,*_): pass
+        def execute(self,query,*_): self.query=query
+        def fetchall(self):
+            if "SELECT upload_file_id, user_id" in self.query:
+                return [(1,1,1,"DONE")]
+            assert self.query.count("DOUBLE PRECISION") == 5 and "LIMIT 150001" in self.query
+            return TooMany()
+    class Connection:
+        read_only=False
+        rolled_back=False
+        def __enter__(self): return self
+        def __exit__(self,*_): pass
+        def cursor(self): return Cursor()
+        def rollback(self): self.rolled_back=True
+    connection=Connection()
+    monkeypatch.setattr(repository,"get_settings",lambda:SimpleNamespace(database_url="fake"))
+    monkeypatch.setattr(repository.psycopg,"connect",lambda *_a,**_k:connection)
+    with pytest.raises(CalculationInputError):
+        repository.load_product_daily(1,[1],user_id=1)
+    assert connection.read_only and connection.rolled_back
 
 
-def test_stub_drafts_pass_real_validator(prepared):
-    assert prepared["offline_report"]["validation_pass_rate"] == 1.0
-    assert prepared["offline_report"]["final_text_number_mismatch"] == []
+def test_partial_settings_can_use_other_source_skus_as_risk_pool(client, monkeypatch):
+    # 설정은 평가 대상만 지정한다. 다른 원본 SKU는 동일 조건의 위험 pool로 남는다.
+    req, daily = request((1,)), dataset((1,2))
+    response = run_backtest(req, daily)
+    assert {a.product_id for a in response.sku_accuracy} == {1}
+    assert {a.product_id for a in response.actual_inbound_comparison} == {1}
+    assert sum(b.cases for b in response.scenario_reliability.risk_buckets) > 0
+    monkeypatch.setenv("ENGINE_MODE", "real")
+    monkeypatch.setattr("app.repository.load_product_daily", lambda *_a, **_k: daily)
+    http = client.post("/engine/backtest", json=req.to_json_dict())
+    job = dict(contractVersion="1", jobId="partial", jobType="BACKTEST", payload=req.to_json_dict())
+    assert http.status_code == 200
+    assert http.json() == process_message(json.dumps(job)).result == response.to_json_dict()
 
 
-def test_quiz_answer_keys(normal):
-    qs = {q.kind: q for q in make_questions(for_experiment(normal))}
-
-    def ans(q):
-        return next(o["text"] for o in q.options if o["id"] == q.answer)
-
-    assert ans(qs["basis"]) == "410개"
-    assert ans(qs["diff"]) == "60개 늘어난다"  # 79 − 19
-    assert ans(qs["stockout"]) == "80%만"  # 80%만 잔여 0개
-    assert ans(qs["before"]) == "5%"
-    for q in qs.values():
-        assert len({o["text"] for o in q.options}) == len(q.options) >= 3
+def test_large_stock_does_not_hide_a_broken_balance_identity():
+    from engine.evaluation import case_from_sample, index_daily
+    daily = dataset()
+    daily[['opening_qty','closing_qty']] *= 10**12
+    batch = generate_error_samples(daily, origins=[date(2026,5,1)], horizon_days=10,
+        period=request().tune_period, period_name='TUNE', observed_through=date(2026,7,31))
+    sample = batch.samples[0]
+    assert case_from_sample(sample, index_daily(daily)) is not None
+    broken = daily.copy()
+    broken.loc[broken.stock_date==date(2026,5,2),'opening_qty'] += 1
+    assert case_from_sample(sample, index_daily(broken)) is None

@@ -33,8 +33,8 @@ class CleaningInputError(CalculationInputError):
 MAX_QTY = 999_999_999_999_999
 MAX_UNCOMPRESSED = 16 * 1024 * 1024
 MAX_SOURCE_ROWS = 100_000
-MAX_UNIT_DAYS = 5_000
-MAX_PRODUCT_DAYS = 2_000
+MAX_UNIT_DAYS = 20_000
+MAX_PRODUCT_DAYS = 10_000
 MAX_COLUMNS = 256
 
 
@@ -47,7 +47,7 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
     source, content = files[0]
     try:
         try:
-            units = read_ledger(content, source.original_name)
+            units = read_ledger(content, source.original_name, quarantine_pre_receipt=True)
         except CleaningInputError:
             raise
         except Exception as exc:
@@ -69,6 +69,8 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
         total += sum(previous_units.values()) if previous_units else 0
         if total > MAX_QTY:
             raise CleaningInputError("재고 수량 합계가 안전한 정수 범위를 벗어났어요")
+        quarantine = units[units.stock_date < units.received_on]
+        quarantined = set(quarantine.sku_barcode)
         grid = _unit_days(units, previous_units)
         if (grid.opening_qty < 0).any():
             raise CleaningInputError("기초 재고는 음수일 수 없어요")
@@ -76,21 +78,29 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
             present = set(zip(units.source_inventory_key, units.received_on, strict=True))
             if any(qty and key not in present for key, qty in previous_units.items()):
                 raise CleaningInputError("전월 잔여 재고의 재고관리단위가 이번 자료에 없어요")
-        bad = check_stock_balance(units, previous_units)
-        product_daily = mark_valid_observations(to_product_daily(units, previous_units))
+        bad = _bad_from_grid(grid)
+        product_daily = mark_valid_observations(_product_from_grid(grid))
+        unsafe = product_daily.sku_barcode.isin(quarantined | set(bad.sku_barcode))
+        product_daily.loc[unsafe, "is_valid_observation"] = False
+        product_daily.loc[unsafe, "observation_note"] = "원본 검증 제외 SKU(해당 파일 전체 미관측)"
         product_info = metadata.drop_duplicates("sku_barcode").set_index("sku_barcode")
         products = [dict(sku_barcode=bc, sku_name=row.sku_name,
                          unit_cost=None if pd.isna(row.unit_cost) else int(row.unit_cost),
                          is_new=bc not in known_barcodes)
                     for bc, row in product_info.iterrows()]
         inventory_units = metadata[[*UNIT_KEY, "sku_barcode"]].to_dict("records")
-        records = units.merge(grid[[*UNIT_KEY, "stock_date", "opening_qty"]],
+        records = units[units.stock_date >= units.received_on].merge(grid[[*UNIT_KEY, "stock_date", "opening_qty"]],
                               on=[*UNIT_KEY, "stock_date"], validate="one_to_one")
         records = records.drop(columns=["source_file", "sku_barcode", "sku_name", "unit_cost"])
         records["upload_file_id"] = source.upload_file_id
         product_daily["upload_file_id"] = source.upload_file_id
         excluded = []
-        for row in bad.drop_duplicates("sku_barcode").itertuples():
+        for row in quarantine.sort_values(["stock_date", "source_row"]).drop_duplicates("sku_barcode").itertuples():
+            excluded.append(dict(sku_barcode=row.sku_barcode, sku_name=product_info.loc[row.sku_barcode, "sku_name"],
+                                 date=row.stock_date,
+                                 reason=(f"원본 {row.source_row}행에 입고일 이전 기록이 있어 이 상품을 제외했어요. "
+                                         "원본 날짜를 확인해 주세요")))
+        for row in bad[~bad.sku_barcode.isin(quarantined)].drop_duplicates("sku_barcode").itertuples():
             excluded.append(dict(sku_barcode=row.sku_barcode, sku_name=product_info.loc[row.sku_barcode, "sku_name"],
                                  date=row.stock_date, reason=row.reason))
         return CleanResponse(period_start=units.stock_date.min(), period_end=units.stock_date.max(),
@@ -106,7 +116,7 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
         raise CleaningInputError("수불부 형식 또는 값이 올바르지 않아요") from exc
 
 
-def read_ledger(content: bytes, original_name: str) -> pd.DataFrame:
+def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: bool = False) -> pd.DataFrame:
     """엑셀 수불부 1개(재고관리단위 × 날짜 가로형)를 세로형으로 바꾼다. 연 · 월은 파일명(YYYY-MM · YYYYMM)에서 읽는다.
 
     반환 칼럼: source_file, source_sheet, source_row, source_inventory_key(sku_mixed_id), received_on,
@@ -196,7 +206,7 @@ def read_ledger(content: bytes, original_name: str) -> pd.DataFrame:
                 cells = row[col:col + 4]
                 if all(c is None for c in cells):
                     continue
-                if stock_date < unit["received_on"]:
+                if stock_date < unit["received_on"] and not quarantine_pre_receipt:
                     raise CleaningInputError("재고 날짜가 입고일보다 빨라요")
                 if len(cells) != 4:
                     raise CleaningInputError("날짜별 수량 열이 부족해요")
@@ -227,6 +237,10 @@ def check_stock_balance(units: pd.DataFrame, previous_units=None) -> pd.DataFram
     diff_qty = 기록 기말 − 계산 기말, reason). 수량 단위: 개.
     """
     grid = _unit_days(units, previous_units)
+    return _bad_from_grid(grid)
+
+
+def _bad_from_grid(grid: pd.DataFrame) -> pd.DataFrame:
     bad = grid[grid["diff_qty"] != 0].copy()
     bad["reason"] = [_mismatch_reason(r) for r in bad.itertuples()]
     return bad[["sku_barcode", *UNIT_KEY, "stock_date", "diff_qty", "reason"]].reset_index(drop=True)
@@ -239,6 +253,10 @@ def to_product_daily(units: pd.DataFrame, previous_units=None) -> pd.DataFrame:
     상품 값 = 그 상품 재고관리단위 값의 합 (기초 재고도 단위별 기초의 합 = 상품의 전날 기록 기말). 수량 단위: 개.
     """
     grid = _unit_days(units, previous_units)
+    return _product_from_grid(grid)
+
+
+def _product_from_grid(grid: pd.DataFrame) -> pd.DataFrame:
     qty = ["opening_qty", *MOVES, "closing_qty"]
     return grid.groupby(["sku_barcode", "stock_date"], as_index=False)[qty].sum()
 

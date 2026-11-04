@@ -89,7 +89,11 @@ def test_invalid_payload_and_oversized_utf8(monkeypatch):
                         status=JobStatus.SUCCEEDED, result={"text": "한" * 310_000}))
     calls = run_message(monkeypatch, envelope())
     body = calls[1][1]["MessageBody"]
-    assert json.loads(body)["error"]["code"] == "RESULT_TOO_LARGE"
+    assert json.loads(body)["contractVersion"] == "2"
+    import base64
+    import gzip
+    decoded = json.loads(gzip.decompress(base64.b64decode(json.loads(body)["payload"])))
+    assert decoded["result"]["text"] == "한" * 310_000
     assert len(body.encode()) < 900_000
 
 

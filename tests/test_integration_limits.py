@@ -30,8 +30,10 @@ def source():
 def test_clean_rejects_ambiguous_cost_and_date():
     with pytest.raises(cleaning.CleaningInputError):
         cleaning.clean([(source(), build_ledger([1], [unit(), unit(mixed_id="B", cost=11)]))], set())
-    with pytest.raises(cleaning.CleaningInputError):
-        cleaning.clean([(source(), build_ledger([1], [unit(received_on="2026-05-02")]))], set())
+    quarantined = cleaning.clean([(source(), build_ledger([1], [unit(received_on="2026-05-02")]))], set())
+    assert quarantined.validation.excluded_skus
+    assert not any(r.is_valid_observation for r in quarantined.product_daily_stocks)
+    assert not quarantined.unit_daily_records
 
 
 def test_zip_and_forged_dimension_limits(monkeypatch):

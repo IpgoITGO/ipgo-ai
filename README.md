@@ -4,9 +4,11 @@
 Spring Boot 백엔드가 이 서버를 호출하고, 계산 결과 저장은 백엔드가 합니다.
 
 기본 HTTP 실행은 mock입니다. `ENGINE_MODE=real`에서는 단일 XLSX 정제와 계산·직접 시나리오에
-실제 엔진을 연결합니다. 백테스트 구현과 계산 결과에서 인사이트 입력을 만드는 변환은 아직
-미완료입니다. `/engine/insight`의 LLM은 계산과 별도로 동작하며 사용할 때만 API key가 필요합니다.
-이 변경은 배포하지 않았고 실제 RDS·S3·SQS·Spring 저장을 통합 검증하지 않았습니다.
+실제 엔진을 연결합니다. HTTP 계산·직접 입력 시나리오·SQS 계산은 동일 source의 DA08 표본으로
+DA-07 위험을 계산하고 인사이트 입력을 조립합니다. 2026년5~7월·주간 기준일·최소20건 정책을 고정했습니다.
+전체 백테스트 API/worker는 TUNE 정책 선정과 TEST 평가, DA-13 등급·LOW 경험 출고 범위를 반환합니다.
+`/engine/insight`의 LLM은 계산과 별도로 동작하며 사용할 때만 API key가 필요합니다.
+real engineVersion은0.6.0입니다. mock 응답은 기존 계약의 정적 예시이며 실제 배포·Spring 저장·LLM 통합은 별도입니다.
 
 ## 실행
 
@@ -48,6 +50,7 @@ ruff check .                     # 코드 검사
 | `IPGO_UPLOAD_BUCKET` | AWS 환경에서 원본을 읽을 private S3 bucket | 없음 |
 | `IPGO_JOBS_QUEUE_URL` | 정제·계산·백테스트 job queue | 없음 |
 | `IPGO_RESULTS_QUEUE_URL` | 처리 결과를 Spring에 전달할 result queue | 없음 |
+| `IPGO_RISK_ENABLED` | 고정된 DA07 정책으로 표본 생성/위험 계산. false면 미산출 null | `true` |
 | `OPENAI_API_KEY` | `real` 모드의 AI 인사이트 LLM 호출에만 필요 | 없음 |
 | `OPENAI_MODEL` | AI 인사이트 LLM 모델 ([모델 선정](docs/ai-insight/llm-model-selection.md)) | `gpt-4o-mini` |
 | `LLM_TIMEOUT_SEC` | LLM 호출 한 번의 시간 제한(초). 넘으면 `LLM_TIMEOUT` | `10` |
@@ -73,10 +76,14 @@ ruff check .                     # 코드 검사
 422 `INVALID_INPUT`입니다. worker에서 발생한 `CalculationInputError`는 `FAILED/INVALID_INPUT`으로
 반환합니다. 일반 DB·네트워크 오류의 기존 재시도 방식은 유지합니다.
 
-이 단계의 `engineVersion`은 `0.3.0`입니다. 입고가 필요한 계산의 `expectedShortageOn`은 신규 입고 0개·기존 발주를 반영한 시뮬레이션에서
+이 단계의 `engineVersion`은 `0.6.0`입니다. 입고가 필요한 계산의 `expectedShortageOn`은 신규 입고 0개·기존 발주를 반영한 시뮬레이션에서
 커버 기간 안에 재고가 처음 0이 되는 날짜입니다. 기간 밖의 소진일을 임의로 추정하지 않습니다.
-DA-07 품절 위험, DA-13 정확도와 백테스트는 아직 계산하지 않습니다. `riskStatus`, 위험도·표본 수·정확도 등급·
-평가 수치는 `null`이며 **품절 없음, 위험 0%, 평가 통과를 뜻하지 않습니다.** `validObservationDays`는
+HTTP/SQS는 고정 정책의 DA07 context를 공급합니다. 최소20건이면 SKU 또는 POOLED 위험을,
+실제 부족이면 INSUFFICIENT_SAMPLE을 반환합니다. 비활성 또는 정책 결정일 전의 요청은 미산출 null입니다.
+DA-13 등급은 관측일·TUNE 커버 실적으로 산출합니다. 커버 실적이 없으면 HIGH를 부여하지 않습니다.
+LOW 범위는 동일 산식·D의 실적/예측 비율 P10~P90을 H일 예측에 비례 적용하며,
+SKU20건→전체SKU20건 순으로 선택합니다. 경험 범위이며 신뢰구간이 아닙니다. 부족하면 null입니다.
+**미산출 null은 품절 없음, 위험0%, 평가 통과를 뜻하지 않습니다.** `validObservationDays`는
 선택한 상품 기록 중 기준일까지의 유효 관측일 수입니다. 시나리오의 기간 내 소진일·미충족 수요는
 기존 DA-06 `simulate()`의 실제 계산 결과입니다.
 
@@ -92,9 +99,11 @@ DB 미설정은 계산 성공으로 대체하지 않습니다. DB 연결 제한�
 
 - XLSX 원본은 10 MiB, 압축 해제 합계는 16 MiB 이하입니다. 1 MB를 넘는 항목의 압축비가
   1000배를 넘으면 거부합니다. 원본 행은 최대 100,000개, 정제 격자는 재고관리단위×일
-  5,000개 및 상품×일 2,000개입니다. XLSX는 단일 파일이며 잘못된 원본은 `INVALID_SOURCE`입니다.
+  20,000개 및 상품×일 10,000개입니다. XLSX는 단일 파일이며 잘못된 원본은 `INVALID_SOURCE`입니다.
 - 상품별 `leadTimeDays + reviewCycleDays`는 최대 366일, `today - asOfDate`는 최대 730일,
-  계산 요청의 세 시나리오 예상 결과는 총 10,000일 이내이며 DB 원본 조회는 50,000행 이내입니다. 초과하면 `INVALID_INPUT`입니다.
+  계산 요청의 세 시나리오 예상 결과는 총 10,000일 이내이며 DB 원본 조회는 150,000행 이내입니다. 초과하면 `INVALID_INPUT`입니다.
+- DA07 표본 예측 후보는 요청당 최대16,000개입니다. 조정 구간 SKU수×성숙한 기준일수×A/B2개를
+  H 및 D별 합산하며 초과하면 INVALID_INPUT입니다. 이 보호 한도와 통계적 최소20건은 다릅니다.
 - 한 Python 프로세스에서 정제·계산·시나리오·백테스트는 동시에 하나만 실행합니다. 사용 중인
   HTTP 요청은 503 `ENGINE_BUSY`, worker 메시지는 삭제하지 않고 재시도합니다. 이 잠금은 프로세스
   간 공유되지 않으므로 one-box에서는 API 프로세스 하나와 embedded worker 하나만 사용해야 합니다.
@@ -114,7 +123,81 @@ embedded worker가 비정상 종료되면 health가 503입니다. worker는 결�
 검증: `pytest -q`, `ruff check .`. 정제 연결 테스트는 가짜 XLSX를 사용하고 계산 연결 테스트는
 DB 조회만 대체합니다. 실제 업무 연동 완료나 배포 승인을 뜻하지 않습니다.
 
+## DA-08 최소 시계열 오차 표본 (#36)
+
+`engine.backtest.generate_error_samples()`는 명시한 기준일·평가 길이·TUNE/TEST 구간·관측 확정일로
+상품별 A/B를 각각 평가합니다. 예측에는 기준일까지만 쓰고, 실적에는 다음 날부터 평가 종료일까지의
+누락 없는 유효 관측 출고량만 씁니다. 미래에 처음 등장한 상품도 관측 확정일 전 표본 대상에 넣지 않습니다.
+
+- 결과는 상품/산식/기준일/평가 종료일별 예측·관측 출고·부호 오차와 `실적/예측` 비율입니다.
+  예측이0이거나 비율이 비유한이면 비율은 None이며 사유를 남깁니다. 수량은 올림 전 소수입니다.
+- 기록 누락·무효 관측·중복·산식 사용 불가 등은 별도 제외 기록에 남기며, 데이터나 산식을 대체하지 않습니다.
+  겹치는 평가 구간은 독립 표본 수로 간주하지 않습니다.
+- 이 함수는 내부 표본 생성만 담당합니다. 전체 `run_backtest`/HTTP·worker 응답, MAE/WAPE 집계,
+  정책 선정·정확도·DB 저장 연결은 후속입니다. DA07 표본 생성은 HTTP/SQS의 공통 계산 경로에서 호출합니다.
+- 상세 입력과 검증 범위는 [DA-08 표본 계약](docs/decisions/0005-da08-error-samples.md)을 따릅니다.
+
+## DA-07 품절 위험 (#36)
+
+`RiskContext`에 DA08 batch·5/1~7/31 조정 기간·최소 표본 수를 명시하고
+`calculate(..., risk_context=context)` 또는 `custom_scenario(..., risk_context=context)`에 전달합니다.
+HTTP/SQS/직접 입력 경로는 이 context를 자동으로 준비합니다. source 소유권을 확인한 동일 DB 조회 결과를 쓰며
+추가 원본을 자동으로 가져오지 않습니다. 기본 정책은 app/risk_policy_2026.json에 최소20건·5/1~7/31·
+5/1부터7일 간격 기준일로 고정했고, 사용자 위임으로 결정한2026-11-03 이전 요청에 소급하지 않습니다.
+
+- 실제 사용한 산식과 D=g+H 길이가 같고 기준일까지 실적이 확정된 TUNE 표본만 사용합니다.
+  SKU가 충분하면 SKU, 부족하면 대상 SKU를 포함한 전체 SKU를 사용하며 전체도 부족하면 INSUFFICIENT_SAMPLE입니다.
+- 각 `실적/예측` 비율을 g일 예측에도 적용해 시작 재고를 다시 구하고, 같은 입고량과 도착일로 H일을 재생합니다.
+  위험은 도착 전/후에 미충족 수요가 생긴 사례의 비율이며 기말0만으로 사건을 세지 않습니다.
+- 유효 관측일7~13일은 LOW_GRADE로 모든 위험을 보류합니다. DA13 전체 등급/LOW 범위는 만들지 않습니다.
+  모순·중복 표본은 오류이며 실제 부족과 구분합니다. 표본 수는 평가 사례 수이고 독립 표본 수가 아닙니다.
+- 수량·기본 시나리오의 재고/소진일은 그대로 두고 준비된 위험만 추가합니다. 실제 LLM은 호출하지 않습니다.
+  IPGO_RISK_ENABLED=false이거나 request.today가 정책 결정일 이전이면 미산출 null을 유지합니다.
+- 최소20건은 경험 빈도 분해능을5%p 이내로 두는 운영 문턱입니다. 주간 조정 표본으로 상품별 사례가
+  최대12개(D10)/9개(D34)인 이번 자료는 POOLED가 됩니다. 겹치는 창/상품 간 상관을 독립 표본으로 보지 않습니다.
+- 원본은 현재 업로더 격자 제한을 초과합니다. 별도 오프라인에서 조사한 결과를 실제 원장 업로드 성공으로
+  확대하지 않습니다. 2025년1월의 입고일 전 비영 기록도 이번에 수정하지 않았습니다.
+- 정책 파일은 image에 포함하고 SHA256을 검사합니다. 손상은 HTTP503/RISK_POLICY_INVALID이며 worker는 기존 재시도 경로를 따릅니다.
+- 식·출처·제외 규칙·사용 경계는 [DA-07 결정 기록](docs/decisions/0006-da07-stockout-risk.md)을 따릅니다.
+  현재 기준/연결·실제 자료 분석 한계는 [0007](docs/decisions/0007-da07-runtime-sampling.md)을 따릅니다.
+
+## AI 인사이트 전송 계약 (#10)
+
+현재 계약은 [0002](docs/decisions/0002-insight-contract.md)입니다. FastAPI는 이름 목록으로 LLM 초안과
+검사 결과를 만들고, 숫자·방향 문구 삽입/대조·기본문장·화면 `mode`는 Spring이 처리합니다.
+
+- `InsightInput.placeholders`는 값 dict가 아닌 이름 list입니다. `directions` 값은 `높음/낮음/같음`입니다.
+  설명 시나리오와 산식 대체·시작 재고 추정·도착일 없는 발주 여부를 전송할 수 있습니다.
+- `InsightResponse`는 기존 초안·통과/실패·사유·시간/비용에 `promptVersion`을 더합니다.
+  실제 서비스는 사용한 prompt 버전, 모의 응답은 `mock`을 반환합니다. FastAPI 응답에 `mode`나 기본 문장은 넣지 않습니다.
+- 계산 요청의 `noDateReceipts: [{productId, quantity}]`는 설명용이며 해당 상품의 `noDateReceiptQty`로 합산합니다.
+  양수 정수 수량만 받고 권장량·재고 시뮬레이션에는 넣지 않습니다. 도착일 있는 발주는 `plannedReceipts`로 분리합니다.
+- `engine.insight_facts.to_insight_input(result, sku_label, as_of_date=...)`는 한 상품의 계산 결과를
+  이름 목록·비교 방향으로 바꿉니다(#36). 실제 상품명 대신 별칭을 넘기며, 시작 재고 추정 시 요청의 기준일도 필요합니다.
+  중복 시나리오를 제외하고 CUSTOM도 처리합니다. 방향은 비교표 표시 기준(재고 내림·위험 정수 %)으로 정합니다.
+  `build_catalog`는 값이 있는 키 이름만 만들고 문구 키·실제 수치·상품 ID는 넣지 않습니다.
+- 계산 응답은 시나리오 조립 후 변환기를 호출합니다. OK가 아니거나 위험 상태·필수 사실이 없으면 `insightInput`은 null입니다.
+  HTTP/SQS real 경로는 DA-07 표본을 생성해 실제 위험 상태를 채운 뒤 변환합니다.
+  비활성/정책 결정일 이전·계산 불가·LOW 범위 미완성 등 필수 사실이 없으면 입력을 보류합니다.
+  null을 표본 부족이나 SKU 위험으로 추측하지 않습니다. LOW_GRADE의 범위나 OK 위험/표본/기준이 빠져도 생성을 보류합니다.
+- mock calculate의 `insightInput`을 그대로 mock insight로 보낼 수 있습니다. 이는 전송 형식 검증용 합성 예시이며
+  Spring 저장·유료 LLM 응답의 증거가 아닙니다. 변환 테스트는 기존 합성 결과를 재사용하고,
+  HTTP 연결 검증은 가짜 상류 위험 상태와 FakeClient를 씁니다. 실제 위험 산출·유료 LLM·업무 전체 흐름 검증과 구분합니다.
+
 ## AWS 데이터 접근 계약
+
+Spring이 업무 데이터·상태·결과 저장을 소유하고 FastAPI reader는 다음 view를 `SELECT`만 합니다.
+정확한 컬럼·source 선택·권한과 검증 근거는 [조회 전용 view 계약](docs/decisions/0004-reader-view-contract.md)을 따릅니다.
+
+| view | 용도 |
+|---|---|
+| `ai_product_daily_stocks_v1` | 지정한 DONE source의 상품 일별 계산 입력 |
+| `ai_cleaning_sources_v1` | 현재 정제 파일의 소유권·상태와 이전 월 최신 revision 확인 |
+| `ai_cleaning_products_v1` | 회원별 기존 바코드와 새 상품 판정 |
+| `ai_cleaning_previous_units_v1` | 검증된 이전 파일의 재고관리단위별 월말 기말 |
+
+view는 회원별 RLS를 대신하지 않습니다. repository가 회원·창고·source를 확인하며 reader에는
+업무 table 직접 조회·DML·DDL·migration 권한을 주지 않습니다.
 
 단일 호스트 개발 환경에서 `AWS_DEV_COMPUTE_MODE=onebox`는 ARM 이미지와
 `ipgo-dev-onebox-ai-api` 서비스를 선택합니다. 검증한 구성은 mock API 최대 1개와 worker 0개이며,
@@ -176,3 +259,32 @@ flowchart LR
 - [작성 규칙](docs/rules/conventions.md)
 - [안전 규칙](docs/rules/safety.md)
 - [AI 인사이트 prompt 규칙과 기본 문장](docs/ai-insight/prompt-and-fallback.md)
+
+
+## 백테스트와 실제 원장 검증
+
+`POST /engine/backtest`와 SQS `BACKTEST`는 `settings`에 상품별 리드타임·주기·입고단위를
+명시해야 합니다(real에서 빈 설정은 INVALID_INPUT). TUNE은5/1~7/31, TEST는8/1~10/14이고
+TEST 기준일은9월 말까지만 생성합니다. 주7일 기준이며 예측에는 각 기준일까지의 기록만 씁니다.
+A/B 공통 사례의 TUNE WAPE로 기본 산식을 정하고, 커버95%를 달성하는 최소 배수를 선택합니다.
+전부 미달이면 최고 성공률(동률 최소 배수)을 선택하고 `targetMet=false`를 반환합니다.
+실적0분모·표본0건의 오차/비율/선택 배수는 null로 남깁니다.
+
+`testPolicyMetric`은 고정 정책의 TEST 결과입니다. `excessTargetMet`(TUNE 과잉10% 목표)은
+커버 목표와 별개입니다. DA10은 P80/P100/P120의 서로 다른 수량만 집계하고, 위험 구간20사례
+미만 비율은 null입니다. DA12는 실제 관측 출고·조정을 같은 조건에 적용한 재생입니다.
+과거 예정 발주 정보가 없어 계산 경로에 미래 실제 입고를 제공하지 않습니다. 겹치는 창의
+노출 일수/사례를 독립 관측이나 실제 업무 효과로 해석하지 않습니다.
+Spring의 BACKTEST job 생성·저장은 아직 별도이며 이 단계는 AI HTTP/worker 응답까지입니다.
+
+입고일 이전 기록은 추정 정정하지 않습니다. 원본을 보존하고 해당 파일의 SKU를 제외하며,
+상품 일별 관측을 전부 false로 표시합니다. 입고일 이후의 원본 단위 기록은 다음 월 연결에
+보존합니다. 이 제외 파일을 선택하는 동안 Spring의 기존 제외 규칙이 적용됩니다.
+
+큰 SQS 결과는 wire900,000bytes 이하의 gzip/base64 v2로 전송합니다. 해제16MiB 상한을 두며
+**서버 decoder를 먼저 배포**해야 합니다. 이번 변경의 검증 범위·원장 출처·복구 순서는
+[결정 기록](docs/decisions/0008-ledger-evaluation.md)을 따릅니다. 실제 LLM은 사용하지 않았습니다.
+
+로컬 검증은 AI526개 테스트·Ruff 통과, 첨부22개월 정제/압축과117,640행의 조건부 평가입니다.
+256MiB/x86 단독 HTTP31상품 검증은58.3초였습니다. 실제 PostgreSQL·SQS 배달·Spring 저장·ARM·
+실사용 효과는 별도 검증이 필요하며, 이 한 번의 관측을 전체60초 SLA 보장으로 해석하지 않습니다.
