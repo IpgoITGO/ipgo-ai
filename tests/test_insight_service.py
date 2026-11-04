@@ -39,6 +39,20 @@ def _normal_input():
     return _fixture_input(next(c for c in NAMES_ONLY if c.id == "pooled"))
 
 
+def test_seller_checks_follow_metadata_flags():
+    """#58 메타데이터가 true이고 키가 있을 때만 '셀러가 확인할 사항' 줄 하나 (#53, #4 문서 3장)."""
+    base = _normal_input()
+    assert {"start_stock", "as_of_date"} <= set(base.placeholders)
+    assert "셀러가 확인할 사항" not in build_prompt(base).user  # 기본값 false는 근거로 쓰지 않음 (0002 4장)
+    keys = [*base.placeholders, "no_date_receipts"]
+    both = base.model_copy(update={"placeholders": keys, "start_stock_estimated": True, "has_no_date_receipts": True})
+    lines = [ln for ln in build_prompt(both).user.splitlines() if ln.startswith("셀러가 확인할 사항")]
+    assert len(lines) == 1  # 둘이면 한 괄호로 (따로 주면 두 번째를 빠뜨림, #53 11/4 시험)
+    assert "{{as_of_date}}" in lines[0] and "{{no_date_receipts}}" in lines[0]
+    flag_only = base.model_copy(update={"has_no_date_receipts": True})  # 키가 없으면 줄도 없음
+    assert "셀러가 확인할 사항" not in build_prompt(flag_only).user
+
+
 def test_system_prompt_is_the_measured_fixture():
     assert SYSTEM_PROMPT == load_cases()[0]  # #32에서 측정한 system prompt와 같은 글
 
