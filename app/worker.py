@@ -5,7 +5,6 @@ is not renewed. Jobs exceeding it may run twice;
 result consumers must deduplicate by job ID. Shutdown has a bounded join, so an
 in-flight job can also be redelivered after termination.
 """
-import json
 import logging
 import signal
 import threading
@@ -16,12 +15,13 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.jobs import JobEnvelope, JobError, JobStatus, JobType, ResultEnvelope, execute
+from app.result_transport import MAX_RESULT_BYTES as MAX_RESULT_BYTES
+from app.result_transport import encode_result
 from engine.calculate import CalculationInputError
 from engine.clean import CleaningInputError
 from schemas.engine import BacktestRequest, CalculateRequest, CleanRequest
 
 logger = logging.getLogger(__name__)
-MAX_RESULT_BYTES = 900_000
 
 
 def _failure(job: JobEnvelope, code: str, message: str) -> ResultEnvelope:
@@ -78,11 +78,12 @@ def run_loop(stop: threading.Event, settings, sqs) -> None:
                 break
             try:
                 result = process_message(message["Body"])
-                body = json.dumps(result.to_json_dict(), ensure_ascii=False)
-                if len(body.encode("utf-8")) > MAX_RESULT_BYTES:
+                try:
+                    body = encode_result(result)
+                except ValueError:
                     job = JobEnvelope.model_validate_json(message["Body"])
                     result = _failure(job, "RESULT_TOO_LARGE", "결과가 너무 커서 처리할 수 없어요.")
-                    body = json.dumps(result.to_json_dict(), ensure_ascii=False)
+                    body = encode_result(result)
                 sqs.send_message(QueueUrl=settings.results_queue_url, MessageBody=body)
                 sqs.delete_message(QueueUrl=settings.jobs_queue_url, ReceiptHandle=message["ReceiptHandle"])
             except ValidationError:

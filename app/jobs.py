@@ -3,9 +3,8 @@ from enum import StrEnum
 
 from pydantic import Field, ValidationError
 
-from app import repository, storage
+from app import calculation, repository, storage
 from app.execution import engine_slot, validate_calculation_capacity
-from engine import calculate as calculation
 from engine import clean as cleaning
 from engine.backtest import run_backtest
 from schemas.base import CamelModel

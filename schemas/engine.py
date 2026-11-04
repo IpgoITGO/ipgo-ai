@@ -284,6 +284,7 @@ class BacktestRequest(CamelModel):
     tune_period: Period                     # 정책 조정: 기준일 5/1 이후, t+H ≤ 7/31
     test_period: Period                     # 최종 시험: 8~9월, t+H ≤ 10/14
     multiplier_candidates: list[float] = [1.00, 1.05, 1.10, 1.15]
+    settings: list[ProductSettings] = Field(default_factory=list)
 
 
 class MethodError(CamelModel):
@@ -291,8 +292,8 @@ class MethodError(CamelModel):
 
     period: str                             # "TUNE" · "TEST"
     method: Method
-    mae: float
-    wape: float
+    mae: float | None
+    wape: float | None
     sample_size: int
 
 
@@ -300,8 +301,8 @@ class MultiplierMetric(CamelModel):
     """DA-09: 배수별 커버 성공률 · 과잉 비율."""
 
     multiplier: float
-    cover_success_rate: float
-    excess_rate: float
+    cover_success_rate: float | None
+    excess_rate: float | None
     meets_target: bool
 
 
@@ -346,14 +347,15 @@ class RiskBucket(CamelModel):
 class ScenarioReliability(CamelModel):
     """DA-10: 시나리오 추정값 vs 실제 출고로 다시 계산한 값."""
 
-    ending_stock_mae: float
+    ending_stock_mae: float | None
     risk_buckets: list[RiskBucket]
+    scenario_cases: int = 0
 
 
 class BacktestResponse(CamelModel):
     engine_version: str
-    selected_method: Method
-    selected_multiplier: float
+    selected_method: Method | None
+    selected_multiplier: float | None
     selection_reason: str
     target_met: bool
     method_errors: list[MethodError]
@@ -361,3 +363,7 @@ class BacktestResponse(CamelModel):
     actual_inbound_comparison: list[ActualInboundComparison]
     scenario_reliability: ScenarioReliability | None = None
     sku_accuracy: list[SkuAccuracy]
+    evaluation_notes: list[str] = Field(default_factory=list)
+    skipped_samples: dict[str, int] = Field(default_factory=dict)
+    test_policy_metric: MultiplierMetric | None = None
+    excess_target_met: bool | None = None

@@ -85,7 +85,7 @@ def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,
         raise AppError(503, "DATABASE_UNAVAILABLE", "정제 데이터를 읽지 못했어요") from exception
 
 def load_product_daily(warehouse_id: int, upload_file_ids: list[int], *, user_id: int) -> pd.DataFrame:
-    """ai_product_daily_stocks_v1에서 지정된 source만 읽는다."""
+    """지정한 source만 읽는다. NUMERIC 수량은 엔진의 float로 받아 Python Decimal 객체 누적을 피한다."""
     settings = get_settings()
     if settings.database_url is None:
         raise AppError(
@@ -99,17 +99,17 @@ def load_product_daily(warehouse_id: int, upload_file_ids: list[int], *, user_id
             product_id,
             upload_file_id,
             stock_date,
-            opening_qty,
-            inbound_qty,
-            outbound_qty,
-            adjustment_qty,
-            closing_qty,
+            CAST(opening_qty AS DOUBLE PRECISION) AS opening_qty,
+            CAST(inbound_qty AS DOUBLE PRECISION) AS inbound_qty,
+            CAST(outbound_qty AS DOUBLE PRECISION) AS outbound_qty,
+            CAST(adjustment_qty AS DOUBLE PRECISION) AS adjustment_qty,
+            CAST(closing_qty AS DOUBLE PRECISION) AS closing_qty,
             is_valid_observation
         FROM ai_product_daily_stocks_v1
         WHERE warehouse_id = %s
           AND upload_file_id = ANY(%s)
         ORDER BY product_id, stock_date, upload_file_id
-        LIMIT 50001
+        LIMIT 150001
     """
     try:
         with psycopg.connect(settings.database_url, autocommit=False, connect_timeout=5) as connection:
@@ -129,7 +129,7 @@ def load_product_daily(warehouse_id: int, upload_file_ids: list[int], *, user_id
                         raise CalculationInputError("원본의 소유권, 창고 또는 완료 상태가 올바르지 않아요")
                     cursor.execute(query, (warehouse_id, upload_file_ids))
                     rows = cursor.fetchall()
-                    if len(rows) > 50000:
+                    if len(rows) > 150000:
                         from engine.calculate import CalculationInputError
                         raise CalculationInputError("현재 계산 서버의 원본 행 수 지원 범위를 초과했어요")
                     columns = [column.name for column in cursor.description or []]

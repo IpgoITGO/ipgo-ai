@@ -17,6 +17,7 @@ class Settings:
     upload_bucket: str | None
     jobs_queue_url: str | None
     results_queue_url: str | None
+    risk_enabled: bool = True
 
 
 def get_settings() -> Settings:
@@ -30,4 +31,5 @@ def get_settings() -> Settings:
         upload_bucket=os.getenv("IPGO_UPLOAD_BUCKET") or None,
         jobs_queue_url=os.getenv("IPGO_JOBS_QUEUE_URL") or None,
         results_queue_url=os.getenv("IPGO_RESULTS_QUEUE_URL") or None,
+        risk_enabled=os.getenv("IPGO_RISK_ENABLED", "true").lower() == "true",
     )

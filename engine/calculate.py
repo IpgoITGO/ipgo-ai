@@ -1,14 +1,16 @@
-"""DA-11: 상품별 예측 → 입고 수량 → 시나리오 응답 조립. 위험·등급은 후속 구현."""
+"""DA-11: 예측 → 수량 → 시나리오 조립. 명시한 DA07 context가 있을 때 위험도 연결한다."""
 from datetime import date, timedelta
 
 import pandas as pd
 
 from engine import ENGINE_VERSION
+from engine.accuracy import empirical_range, grade
 from engine.forecast import forecast_a, forecast_b
 from engine.insight_facts import to_insight_input
 from engine.replenish import required_qty, round_to_order_unit, split_forecast, split_planned_receipts, start_stock
-from engine.scenario import simulate
-from schemas.base import Method, ResultStatus, ScenarioType
+from engine.risk import RiskContext, select_risk_samples
+from engine.scenario import simulate, stockout_risk
+from schemas.base import Method, ResultStatus, RiskStatus, ScenarioType
 from schemas.engine import (
     CalculateRequest,
     CalculateResponse,
@@ -110,7 +112,7 @@ def _product(
     # Reuse the tested no-new-order simulation (existing receipts still apply).
     # This is the first zero closing stock within this calculation's coverage window.
     shortage = request.today + timedelta(days=baseline.depletion_day) if qty and baseline.depletion_day else None
-    # DA-07/13 위험·등급은 검증 후 채우며 0으로 대체하지 않는다.
+    # DA07은 명시한 context가 있을 때 후속 조립한다. DA13 등급은 별도다.
     return ProductResult(
         product_id=product_id, status=ResultStatus.OK if qty else ResultStatus.NOT_NEEDED,
         method=method, method_reason=method_reason, method_fallback=method != request.policy.default_method,
@@ -118,7 +120,7 @@ def _product(
         horizon_days=horizon, forecast_outbound_qty=cover, start_stock_qty=stock, start_stock_estimated=gap > 0,
         planned_receipts_in_horizon=planned_qty, pre_arrival_unmet_qty=baseline.pre_arrival_unmet,
         required_qty_before_rounding=need, recommended_qty=qty, recommended_amount=qty * settings.unit_cost,
-        valid_observation_days=valid_days, expected_shortage_on=shortage,
+        valid_observation_days=valid_days, accuracy_grade=grade(valid_days, None), expected_shortage_on=shortage,
     ), planned
 
 
@@ -143,10 +145,83 @@ def _scenario(
     )
 
 
-def calculate(request: CalculateRequest, product_daily: pd.DataFrame) -> CalculateResponse:
+def _apply_risk(
+    result: ProductResult, request: CalculateRequest, daily: pd.DataFrame, settings: ProductSettings,
+    planned: dict[int, float], context: RiskContext | None,
+) -> None:
+    """동일한 표본으로 도착 전 공통·도착 후 시나리오별 위험을 채운다. 원래 수량/재고는 바꾸지 않는다."""
+    if context is None or result.status not in (ResultStatus.OK, ResultStatus.NOT_NEEDED):
+        return
+    gap = (request.today - request.as_of_date).days
+    selection = select_risk_samples(
+        context, product_id=result.product_id, method=result.method,
+        horizon_days=gap + result.horizon_days, observed_through=request.as_of_date,
+    )
+    result.risk_sample_size = len(selection.samples)
+    # DA07의 확정된 7~13일 위험 억제만 적용한다. DA13 전체 등급/LOW 범위를 만들지 않는다.
+    if 7 <= result.valid_observation_days <= 13:
+        result.risk_status = RiskStatus.LOW_GRADE
+        return
+    if selection.basis is None:
+        result.risk_status = RiskStatus.INSUFFICIENT_SAMPLE
+        return
+    closing = daily.loc[
+        (daily["product_id"] == result.product_id) & (daily["stock_date"] == request.as_of_date), "closing_qty"
+    ].iloc[0]
+    before, _ = split_planned_receipts(
+        [(r.expected_on, r.quantity) for r in request.planned_receipts if r.product_id == result.product_id],
+        request.as_of_date, request.today, result.horizon_days,
+    )
+    for scenario in result.scenarios or [None]:
+        estimate = stockout_risk(
+            selection.ratios, context.min_samples, as_of_closing=float(closing),
+            daily_forecast=result.forecast_outbound_qty / result.horizon_days, gap_days=gap,
+            horizon_days=result.horizon_days, order_qty=scenario.qty if scenario else 0,
+            lead_time_days=settings.lead_time_days, gap_receipts=before, planned_receipts=planned,
+        )
+        result.pre_arrival_risk = estimate.pre_arrival_risk
+        if scenario is not None:
+            scenario.post_arrival_risk = estimate.post_arrival_risk
+    result.risk_status = RiskStatus.OK
+    result.risk_basis = selection.basis
+
+
+def _apply_accuracy(result, request, settings, context, indexed):
+    """동일 산식·H의 확정 TUNE 커버 실적과 D 비율의 LOW 범위를 연결한다(개·비율)."""
+    if result.status not in (ResultStatus.OK, ResultStatus.NOT_NEEDED) or context is None:
+        return
+    from engine.evaluation import accuracy_for, case_from_sample
+    samples = [s for b in context.batches for s in b.samples
+               if s.product_id == result.product_id and s.method == result.method
+               and s.horizon_days == result.horizon_days and s.target_end <= request.as_of_date]
+    cases = [case for s in samples if (case := case_from_sample(s, indexed)) is not None]
+    accuracy = accuracy_for(result.product_id, result.valid_observation_days, cases, settings,
+                            request.policy.multiplier, result.method, result.horizon_days, context,
+                            request.as_of_date)
+    result.accuracy_grade = accuracy.grade
+    result.cover_success_count = accuracy.cover_success_count
+    result.cover_trial_count = accuracy.cover_trial_count
+    result.forecast_error_rate = accuracy.forecast_error_rate
+    if result.accuracy_grade is not None and result.accuracy_grade.value == "LOW":
+        selection = select_risk_samples(context, product_id=result.product_id, method=result.method,
+            horizon_days=(request.today-request.as_of_date).days + result.horizon_days,
+            observed_through=request.as_of_date)
+        if selection.basis is not None:
+            result.forecast_range_low, result.forecast_range_high = empirical_range(
+                result.forecast_outbound_qty, selection.ratios)
+
+
+def calculate(
+    request: CalculateRequest, product_daily: pd.DataFrame, *, risk_context: RiskContext | None = None,
+) -> CalculateResponse:
     """D=g+H일 예측에서 H일 필요량(개)을 구하고, 권장량의 80/100/120%를 입고 단위로 올려 비교한다."""
     settings, daily, ids = _inputs(request, product_daily)
     results = []
+    indexed = {}
+    if risk_context is not None:
+        from engine.evaluation import index_daily
+        indexed = index_daily(daily[(daily.stock_date >= risk_context.period_start)
+                                    & (daily.stock_date <= min(request.as_of_date, risk_context.period_end))])
     for product_id in ids:
         config = settings.get(product_id)
         result, planned = _product(request, daily, product_id, config)
@@ -158,12 +233,16 @@ def calculate(request: CalculateRequest, product_daily: pd.DataFrame) -> Calcula
                     result, config, request.today, planned, qty, kind,
                     duplicate=kind is not ScenarioType.P100 and qty == result.recommended_qty,
                 ))
+        _apply_accuracy(result, request, config, risk_context, indexed)
+        _apply_risk(result, request, daily, config, planned, risk_context)
         result.insight_input = to_insight_input(result, "이 상품", as_of_date=request.as_of_date)
         results.append(result)
     return CalculateResponse(engine_version=ENGINE_VERSION, results=results)
 
 
-def custom_scenario(request: ScenarioRequest, product_daily: pd.DataFrame) -> ScenarioResult:
+def custom_scenario(
+    request: ScenarioRequest, product_daily: pd.DataFrame, *, risk_context: RiskContext | None = None,
+) -> ScenarioResult:
     """한 상품의 같은 입력 snapshot으로 재계산하고, 직접 입력한 수량(개)을 그대로 시뮬레이션한다."""
     ci = request.calculation_input
     settings, daily, ids = _inputs(ci, product_daily)
@@ -178,4 +257,7 @@ def custom_scenario(request: ScenarioRequest, product_daily: pd.DataFrame) -> Sc
         round_to_order_unit(result.recommended_qty * percent / 100, config.order_unit_qty)
         for percent in (80, 100, 120)
     } if result.recommended_qty else set()
-    return _scenario(result, config, ci.today, planned, request.qty, ScenarioType.CUSTOM, request.qty in quantities)
+    scenario = _scenario(result, config, ci.today, planned, request.qty, ScenarioType.CUSTOM, request.qty in quantities)
+    result.scenarios = [scenario]
+    _apply_risk(result, ci, daily, config, planned, risk_context)
+    return scenario
