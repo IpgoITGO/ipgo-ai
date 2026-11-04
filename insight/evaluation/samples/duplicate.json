@@ -1,0 +1,68 @@
+{
+ "id": "calc-2026-06-15-SKU0003",
+ "name": null,
+ "as_of_date": "2026-06-15",
+ "method_fallback": false,
+ "risk_basis": "SKU",
+ "no_date_receipt_qty": 0,
+ "result": {
+  "productId": 9002,
+  "status": "OK",
+  "reason": null,
+  "method": "A",
+  "methodReason": null,
+  "multiplier": 1.05,
+  "horizonDays": 34,
+  "forecastOutboundQty": 40.0,
+  "startStockQty": 10.0,
+  "startStockEstimated": false,
+  "plannedReceiptsInHorizon": 0,
+  "preArrivalUnmetQty": 0.0,
+  "requiredQtyBeforeRounding": 32.0,
+  "recommendedQty": 50,
+  "recommendedAmount": null,
+  "expectedShortageOn": null,
+  "preArrivalRisk": 0.12,
+  "riskSampleSize": 40,
+  "riskStatus": "OK",
+  "accuracyGrade": null,
+  "validObservationDays": null,
+  "coverSuccessCount": null,
+  "coverTrialCount": null,
+  "forecastErrorRate": null,
+  "forecastRangeLow": null,
+  "forecastRangeHigh": null,
+  "scenarios": [
+   {
+    "type": "P80",
+    "qty": 50,
+    "isDuplicate": true,
+    "expectedDepletionOn": null,
+    "expectedEndingStock": 20.0,
+    "unmetDemandQty": 0.0,
+    "postArrivalRisk": 0.06,
+    "dailyProjection": []
+   },
+   {
+    "type": "P100",
+    "qty": 50,
+    "isDuplicate": false,
+    "expectedDepletionOn": null,
+    "expectedEndingStock": 20.0,
+    "unmetDemandQty": 0.0,
+    "postArrivalRisk": 0.06,
+    "dailyProjection": []
+   },
+   {
+    "type": "P120",
+    "qty": 100,
+    "isDuplicate": false,
+    "expectedDepletionOn": null,
+    "expectedEndingStock": 70.0,
+    "unmetDemandQty": 0.0,
+    "postArrivalRisk": 0.01,
+    "dailyProjection": []
+   }
+  ]
+ }
+}

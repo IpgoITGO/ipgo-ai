@@ -1,0 +1,68 @@
+{
+ "id": "calc-2026-06-15-SKU0006",
+ "name": null,
+ "as_of_date": "2026-06-15",
+ "method_fallback": true,
+ "risk_basis": "POOLED",
+ "no_date_receipt_qty": 0,
+ "result": {
+  "productId": 9006,
+  "status": "OK",
+  "reason": null,
+  "method": "B",
+  "methodReason": "작년 동일 구간 유효 관측일 부족으로 A 사용 불가",
+  "multiplier": 1.1,
+  "horizonDays": 34,
+  "forecastOutboundQty": 96.0,
+  "startStockQty": 30.0,
+  "startStockEstimated": false,
+  "plannedReceiptsInHorizon": 0,
+  "preArrivalUnmetQty": 0.0,
+  "requiredQtyBeforeRounding": 75.6,
+  "recommendedQty": 84,
+  "recommendedAmount": null,
+  "expectedShortageOn": null,
+  "preArrivalRisk": 0.07,
+  "riskSampleSize": 120,
+  "riskStatus": "OK",
+  "accuracyGrade": null,
+  "validObservationDays": null,
+  "coverSuccessCount": null,
+  "coverTrialCount": null,
+  "forecastErrorRate": null,
+  "forecastRangeLow": null,
+  "forecastRangeHigh": null,
+  "scenarios": [
+   {
+    "type": "P80",
+    "qty": 72,
+    "isDuplicate": false,
+    "expectedDepletionOn": "2026-07-15",
+    "expectedEndingStock": 0.0,
+    "unmetDemandQty": 2.0,
+    "postArrivalRisk": 0.3,
+    "dailyProjection": []
+   },
+   {
+    "type": "P100",
+    "qty": 84,
+    "isDuplicate": false,
+    "expectedDepletionOn": null,
+    "expectedEndingStock": 18.0,
+    "unmetDemandQty": 0.0,
+    "postArrivalRisk": 0.1,
+    "dailyProjection": []
+   },
+   {
+    "type": "P120",
+    "qty": 108,
+    "isDuplicate": false,
+    "expectedDepletionOn": null,
+    "expectedEndingStock": 42.0,
+    "unmetDemandQty": 0.0,
+    "postArrivalRisk": 0.03,
+    "dailyProjection": []
+   }
+  ]
+ }
+}

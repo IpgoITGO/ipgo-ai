@@ -1,0 +1,48 @@
+{
+ "id": "calc-2026-06-15-SKU0004",
+ "name": "샘플 상품 D",
+ "as_of_date": "2026-06-15",
+ "method_fallback": false,
+ "risk_basis": "SKU",
+ "no_date_receipt_qty": 0,
+ "result": {
+  "productId": 9004,
+  "status": "NOT_NEEDED",
+  "reason": null,
+  "method": "B",
+  "methodReason": null,
+  "multiplier": 1.1,
+  "horizonDays": 34,
+  "forecastOutboundQty": 210.0,
+  "startStockQty": 500.0,
+  "startStockEstimated": false,
+  "plannedReceiptsInHorizon": 100,
+  "preArrivalUnmetQty": 0.0,
+  "requiredQtyBeforeRounding": 0.0,
+  "recommendedQty": 0,
+  "recommendedAmount": null,
+  "expectedShortageOn": null,
+  "preArrivalRisk": null,
+  "riskSampleSize": null,
+  "riskStatus": null,
+  "accuracyGrade": null,
+  "validObservationDays": null,
+  "coverSuccessCount": null,
+  "coverTrialCount": null,
+  "forecastErrorRate": null,
+  "forecastRangeLow": null,
+  "forecastRangeHigh": null,
+  "scenarios": [
+   {
+    "type": "CUSTOM",
+    "qty": 100,
+    "isDuplicate": false,
+    "expectedDepletionOn": null,
+    "expectedEndingStock": 390.0,
+    "unmetDemandQty": 0.0,
+    "postArrivalRisk": 0.0,
+    "dailyProjection": []
+   }
+  ]
+ }
+}
