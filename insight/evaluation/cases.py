@@ -41,12 +41,25 @@ class EvalCase(BaseModel):
     result: ProductResult
 
     @property
+    def effective_result(self) -> ProductResult:
+        """실제 결과 메타데이터를 우선하고 이전 형식의 계산 밖 값으로만 보완한다."""
+        r = self.result
+        return r.model_copy(
+            update={
+                "method_fallback": self.method_fallback if r.method_fallback is None else r.method_fallback,
+                "risk_basis": RiskBasis(self.risk_basis) if r.risk_basis is None else r.risk_basis,
+                "no_date_receipt_qty": r.no_date_receipt_qty or self.no_date_receipt_qty,
+            }
+        )
+
+    @property
     def context(self) -> Context:
+        r = self.effective_result
         return Context(
             as_of_date=self.as_of_date,
-            method_fallback=self.method_fallback,
-            risk_basis=self.risk_basis,
-            no_date_receipt_qty=self.no_date_receipt_qty,
+            method_fallback=bool(r.method_fallback),
+            risk_basis=RiskBasis(r.risk_basis).value,
+            no_date_receipt_qty=r.no_date_receipt_qty,
         )
 
     def scenario(self, t: ScenarioType):
@@ -115,7 +128,7 @@ def from_reference(d: dict, product_id: int = 0) -> EvalCase:
 
 def all_values(case: EvalCase) -> dict[str, str]:
     """Spring이 채울 값: #44 기준 구현의 6장 키 + LLM이 쓸 수 있는 나머지 5장 키(이름 · 소진일 · 미충족 · 차이)."""
-    r = case.result
+    r = case.effective_result
     v = placeholder_values(r, case.context)
     described = [s for s in r.scenarios if not s.is_duplicate]
     base = next((s for s in described if s.type == ScenarioType.P100), None)
@@ -136,15 +149,7 @@ def to_input(case: EvalCase) -> InsightInput | None:
 
     None은 #59의 생성 보류(필수 사실 없음)다. prepare는 이때 LLM을 부르지 않는다 (bank.generate).
     """
-    r = case.result
-    r = r.model_copy(
-        update={
-            "method_fallback": case.method_fallback if r.method_fallback is None else r.method_fallback,
-            "risk_basis": RiskBasis(case.risk_basis) if r.risk_basis is None else r.risk_basis,
-            "no_date_receipt_qty": r.no_date_receipt_qty or case.no_date_receipt_qty,
-        }
-    )
-    return to_insight_input(r, "(이 상품)", as_of_date=case.as_of_date)
+    return to_insight_input(case.effective_result, "(이 상품)", as_of_date=case.as_of_date)
 
 
 def verify_filled(filled: str, values: dict[str, str]) -> tuple[bool, str | None]:

@@ -247,3 +247,56 @@ def test_quiz_answer_keys(normal):
     assert ans(qs["before"]) == "5%"
     for q in qs.values():
         assert len({o["text"] for o in q.options}) == len(q.options) >= 3
+
+
+def test_nested_result_metadata_drives_both_input_and_filled_values(normal):
+    from schemas.base import RiskBasis
+
+    # 실제 엔진이 추가 메타데이터를 ProductResult 안에만 보내는 경우.
+    case = normal.model_copy(
+        update={
+            "method_fallback": True,
+            "risk_basis": "SKU",
+            "no_date_receipt_qty": 0,
+            "result": normal.result.model_copy(
+                update={
+                    "method_fallback": False,
+                    "risk_basis": RiskBasis.POOLED,
+                    "no_date_receipt_qty": 5,
+                }
+            ),
+        }
+    )
+    inp = to_input(case)
+    assert inp is not None and inp.has_no_date_receipts and not inp.method_fallback
+    values = all_values(case)
+    assert values["no_date_receipts"] == "5"
+    assert values["risk_basis"] == "전체 상품의 과거 오차 기준"
+    assert not case.context.method_fallback
+
+
+def test_service_valid_no_date_draft_is_not_an_evaluation_insert_error(normal):
+    from insight.evaluation.bank import generate
+    from insight.service import generate_insight
+    from schemas.base import RiskBasis
+    from schemas.insight import Validation
+
+    case = normal.model_copy(
+        update={
+            "no_date_receipt_qty": 0,
+            "risk_basis": "SKU",
+            "result": normal.result.model_copy(update={"risk_basis": RiskBasis.POOLED, "no_date_receipt_qty": 5}),
+        }
+    )
+    inp = to_input(case)
+    prompt = build_prompt(inp)
+    draft = json.loads(StubClient(bad_rate=0).complete(prompt.system, prompt.user).text)
+    draft["sentences"][-1] = (
+        "도착 예정일 없는 발주 {{no_date_receipts}}개는 계산에 넣지 않았으며, " + draft["sentences"][-1]
+    )
+    raw = json.dumps(draft, ensure_ascii=False)
+    assert generate_insight(inp, FakeClient([raw])).validation == Validation.PASSED
+    result = generate(case, FakeClient([raw]))
+    assert result.path == "llm" and result.number_check_ok
+    assert result.reason_code is None
+    assert "도착 예정일 없는 발주 5개" in result.text

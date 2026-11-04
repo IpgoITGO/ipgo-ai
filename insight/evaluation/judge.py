@@ -326,38 +326,41 @@ def _same_versions(a: dict, b: dict) -> bool:
 def select_targets(
     prepared: dict, call_log: Path, scope: str = "experiment", all_versions: bool = False
 ) -> list[Target]:
-    """호출 로그에서 path=llm 인 문장을 고른다. 기본은 prepared 의 평가 대상 버전과 같은 기록만.
-    experiment: 실험 화면에 고정된 문장(run="experiment"), offline: 1단계 오프라인 반복 생성, all: 둘 다.
-    같은 calc_id·run 기록이 여러 번 있으면 마지막 것을 쓴다."""
+    """현재 스냅샷과 같은 유효 LLM 문장만 고른다.
+
+    같은 scope/calc_id/run의 최신 기록을 먼저 확정한다. 최신 대체·빈 문장·다른 버전 때문에
+    이전 성공을 되살리지 않는다. experiment는 prepared의 실제 표시 문장과도 대조한다.
+    """
     bank = prepared["bank"]
     exp = {d["id"]: d for d in bank["results"]}
     alld = {d["id"]: d for d in bank["all_results"]}
     want = prepared.get("versions") or {}
-    picked: dict[tuple, Target] = {}
+    latest: dict[tuple[str, str, str], dict] = {}
     for line in call_log.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         rec = json.loads(line)
+        s = "experiment" if str(rec.get("run")) == "experiment" else "offline"
+        if scope != "all" and s != scope:
+            continue
+        src = exp if s == "experiment" else alld
+        if rec.get("calc_id") not in src:
+            continue
+        latest[(s, rec["calc_id"], str(rec.get("run")))] = rec
+
+    targets = []
+    for (s, calc_id, run), rec in latest.items():
         if rec.get("path") != "llm" or not rec.get("text"):
             continue
         if not all_versions and not _same_versions(rec.get("versions") or {}, want):
             continue
-        is_exp = str(rec.get("run")) == "experiment"
-        s = "experiment" if is_exp else "offline"
-        if scope != "all" and s != scope:
-            continue
-        src = exp if is_exp else alld
-        if rec["calc_id"] not in src:
-            continue
-        picked[(s, rec["calc_id"], str(rec.get("run")))] = Target(
-            s,
-            rec["calc_id"],
-            str(rec.get("run")),
-            rec["text"],
-            rec.get("template"),
-            EvalCase.model_validate(src[rec["calc_id"]]),
-        )
-    return list(picked.values())
+        if s == "experiment" and "items" in prepared:
+            item = prepared["items"].get(calc_id, {})
+            if item.get("llm_source") != "llm" or item.get("llm_text") != rec["text"]:
+                continue
+        src = exp if s == "experiment" else alld
+        targets.append(Target(s, calc_id, run, rec["text"], rec.get("template"), EvalCase.model_validate(src[calc_id])))
+    return targets
 
 
 # --- 실행·집계 --------------------------------------------------------------------------------

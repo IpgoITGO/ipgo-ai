@@ -77,7 +77,7 @@ class GenResult:
 
 
 def generate(case: EvalCase, client: LLMClient) -> GenResult:
-    r = case.result
+    r = case.effective_result
     values = all_values(case)
     fb = build_fallback(r, case.context)
     fixed_t, fixed_text = (" ".join(fb.template), fb.text) if fb else (None, None)

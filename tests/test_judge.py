@@ -198,7 +198,7 @@ def test_select_targets_filters_versions_and_scope(normal, tmp_path):
     ]
     log = tmp_path / "calls.jsonl"
     log.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in recs[:4]) + "\n", encoding="utf-8")
-    assert [t.text for t in select_targets(prepared, log)] == ["새"]  # 같은 키는 마지막 기록, fixed 제외
+    assert select_targets(prepared, log) == []  # 최신 fixed가 이전 성공을 무효화
     assert [t.text for t in select_targets(prepared, log, scope="offline")] == ["오프"]
     log.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in recs[4:]) + "\n", encoding="utf-8")
     assert select_targets(prepared, log) == []
@@ -242,3 +242,57 @@ def test_truncated_judge_output_is_error(normal):
     row = run_judge([_target(normal)], client, runs=2)[0]
     assert all(v["verdict"] == "error" for v in row["judge"].values())
     assert row["runs"][0]["error"].startswith("출력 잘림")
+
+
+@pytest.mark.parametrize("terminal_path,terminal_text", [("fixed", "현재 기본 문장"), ("none", None), ("llm", "")])
+def test_latest_non_llm_or_empty_output_invalidates_old_success(normal, tmp_path, terminal_path, terminal_text):
+    versions = {"prompt": "p", "fallback": "f", "model": "m"}
+    data = normal.model_dump(mode="json", by_alias=True)
+    prepared = {"versions": versions, "bank": {"results": [data], "all_results": [data]}}
+    base = {"calc_id": normal.id, "run": "experiment", "versions": versions}
+    records = [base | {"path": "llm", "text": "이전 성공"}, base | {"path": terminal_path, "text": terminal_text}]
+    log = tmp_path / "calls.jsonl"
+    log.write_text("\n".join(json.dumps(r) for r in records))
+    assert select_targets(prepared, log) == []
+
+
+def test_experiment_targets_match_the_actual_prepared_material(normal, tmp_path):
+    versions = {"prompt": "p", "fallback": "f", "model": "m"}
+    data = normal.model_dump(mode="json", by_alias=True)
+    prepared = {
+        "versions": versions,
+        "bank": {"results": [data], "all_results": [data]},
+        "items": {normal.id: {"llm_source": "fixed_fallback", "llm_text": "현재 기본 문장"}},
+    }
+    log = tmp_path / "calls.jsonl"
+    log.write_text(
+        json.dumps(
+            {"calc_id": normal.id, "run": "experiment", "versions": versions, "path": "llm", "text": "과거 모델 문장"}
+        )
+    )
+    assert select_targets(prepared, log) == []
+    prepared["items"][normal.id] = {"llm_source": "llm", "llm_text": "다른 실험 자료 문장"}
+    assert select_targets(prepared, log) == []
+    prepared["items"][normal.id]["llm_text"] = "과거 모델 문장"
+    assert [t.text for t in select_targets(prepared, log)] == ["과거 모델 문장"]
+
+
+@pytest.mark.parametrize("terminal_model", [None, "different-model"])
+def test_latest_version_does_not_revive_previous_success_in_any_scope(normal, tmp_path, terminal_model):
+    versions = {"prompt": "p", "fallback": "f", "model": "m"}
+    data = normal.model_dump(mode="json", by_alias=True)
+    prepared = {"versions": versions, "bank": {"results": [data], "all_results": [data]}}
+    records = []
+    for run in ("experiment", 0):
+        base = {"calc_id": normal.id, "run": run, "path": "llm"}
+        records.extend(
+            [
+                base | {"text": "과거 성공", "versions": versions},
+                base | {"text": "최신 문장", "versions": versions | {"model": terminal_model}},
+            ]
+        )
+    log = tmp_path / "calls.jsonl"
+    log.write_text("\n".join(json.dumps(r) for r in records))
+    assert select_targets(prepared, log, scope="all") == []
+    targets = select_targets(prepared, log, scope="all", all_versions=True)
+    assert [(t.scope, t.text) for t in targets] == [("experiment", "최신 문장"), ("offline", "최신 문장")]
