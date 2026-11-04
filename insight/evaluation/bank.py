@@ -7,6 +7,7 @@ prepare   : 결과마다 고정 문장 · AI 작성 문장을 만들고 이해�
 참조 구현과 다른 곳 (#54): 문장을 만드는 곳이 참조 구현 InsightService 하나가 아니다.
   - 초안 · 검사: 서비스 함수 insight.service.generate_insight (/engine/insight와 같은 코드, 이름만 보냄)
   - 값 넣기 · 숫자 대조 · 기본 문장: Spring 대신 #44 기준 구현(tests/insight_fallback.py) + 참조 구현 verify_filled
+  - 입력: 서비스와 같은 #59 to_insight_input() (cases.to_input). None(생성 보류)이면 LLM을 부르지 않는다.
   - LLM을 부르는 것은 정상(OK) 결과만 (#24, IpgoITGO/ipgo-server#25 답변 5).
     참조 구현은 입고 불필요 + 직접 입력도 불렀다.
 """
@@ -109,14 +110,17 @@ def generate(case: EvalCase, client: LLMClient) -> GenResult:
 
     if r.status != ResultStatus.OK:
         return done("fixed", detail=f"상태 {r.status.value}: Spring이 FastAPI를 부르지 않음")
+    inp = to_input(case)
+    if inp is None:  # #59 생성 보류: insightInput이 null이면 FastAPI를 부르지 않음
+        return done("fixed", detail="insightInput null (#59 생성 보류): LLM을 부르지 않음")
     rec = RecordingClient(client)
-    resp = generate_insight(to_input(case), rec)
+    resp = generate_insight(inp, rec)
     last = rec.last
     if resp.validation != Validation.PASSED:
         if last is None:  # 호출 오류 · 시간 초과
             return done("fixed", reason=resp.fail_reason.value, called=True, resp=resp)
         # 서비스는 사유 코드를 돌려주지 않으므로 같은 함수로 다시 판정한다 (LLM은 다시 부르지 않음)
-        prompt = build_prompt(to_input(case))
+        prompt = build_prompt(inp)
         text = None if last.truncated else draft_text(last.text)
         code = "truncated" if last.truncated else "format"
         if text is not None:

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from engine.insight_facts import to_insight_input
 from insight.evaluation.bank import experiment_candidate, for_experiment, make_bank, prepare
 from insight.evaluation.cases import EvalCase, all_values, from_reference, to_input, verify_filled
 from insight.evaluation.config import load_config
@@ -77,6 +78,17 @@ def test_input_builds_service_prompt(normal):
     p = build_prompt(to_input(normal))
     assert p.required == ["qty_p100", "risk_post_p100", "risk_pre"]
     assert "[값:" not in p.user  # 서비스와 같이 이름만 보낸다
+
+
+def test_input_is_service_converter(normal):
+    """입력은 #59 to_insight_input() 그대로, EvalCase의 계산 밖 값은 #58 필드로 (#54 11/4)."""
+    inp = to_input(normal)
+    r = normal.result.model_copy(
+        update={"method_fallback": False, "risk_basis": "SKU", "no_date_receipt_qty": normal.no_date_receipt_qty}
+    )
+    assert inp == to_insight_input(r, "(이 상품)", as_of_date=normal.as_of_date)
+    assert normal.no_date_receipt_qty > 0 and inp.has_no_date_receipts and "no_date_receipts" in inp.placeholders
+    assert inp.scenarios  # #58 scenarios도 채움
 
 
 def test_verify_filled_catches_foreign_numbers():
@@ -197,6 +209,16 @@ def test_not_ok_results_do_not_call_llm(tmp_path):
     client = FakeClient()
     p = prepare(bank, CFG, client, tmp_path / "c.jsonl")
     assert client.calls == [] and p["offline_report"]["n_skipped_fixed"] == 1  # Spring은 OK 결과만 부른다 (#24)
+
+
+def test_null_input_does_not_call_llm(normal, tmp_path):
+    """#59가 None(생성 보류)을 주면 LLM을 부르지 않고 관문 분모에도 넣지 않는다."""
+    c = normal.model_copy(update={"result": normal.result.model_copy(update={"method": None})})
+    assert to_input(c) is None
+    bank = {"all_results": [c.model_dump(mode="json", by_alias=True)], "results": [], "sets": {}, "practice": []}
+    client = FakeClient()
+    rep = prepare(bank, CFG, client, tmp_path / "c.jsonl")["offline_report"]
+    assert client.calls == [] and rep["n_generations"] == 1 and rep["n_llm_called"] == 0  # 산식 없음은 기본 문장도 없음
 
 
 def test_stub_drafts_pass_real_validator(prepared):

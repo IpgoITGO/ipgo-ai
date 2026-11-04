@@ -2,24 +2,23 @@
 
 - 참조 구현(ai_insight v0.3)의 계산 결과 형식(EngineResult)을 0002 이름으로 옮기는 변환(from_reference)을 둔다.
   참조 구현 samples/ · mock_engine 결과를 그대로 쓰기 위해서다.
-- 인사이트 입력(to_input)은 엔진의 to_insight_input()(#10 제외 범위 "별도 Issue")이 생기기 전까지의 대신 함수다.
+- 인사이트 입력(to_input)은 서비스와 같은 #59 engine.insight_facts.to_insight_input()을 쓴다. EvalCase가 따로 가진
+  계산 밖 값(method_fallback · risk_basis · no_date_receipt_qty)은 #44 Context에도 쓰여 그대로 두고, 변환 전에
+  #58 ProductResult 필드에 넣는다.
 - 값 넣기 · 숫자 대조 · 기본 문장은 Spring 대신 #44 기준 구현(tests/insight_fallback.py)을 쓴다.
 """
 
-import math
 import re
 from datetime import date
 
 from pydantic import BaseModel
 
-from schemas.base import Method, ResultStatus, RiskStatus, ScenarioType
+from engine.insight_facts import to_insight_input
+from schemas.base import Method, ResultStatus, RiskBasis, RiskStatus, ScenarioType
 from schemas.engine import ProductResult
 from schemas.insight import InsightInput
-from tests.insight_fallback import Context, _date, _demand, _int, _round, placeholder_values
+from tests.insight_fallback import Context, _date, _demand, _int, placeholder_values
 
-PHRASE_RE = re.compile(
-    r"^(label|action|dir)_|^(formula_desc|risk_basis|reason)$"
-)  # 엔진이 아니라 FastAPI · Spring이 만드는 키
 NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 SCENARIO_NAMES = {
     "p80": "권장량의 80%",
@@ -36,7 +35,7 @@ class EvalCase(BaseModel):
     id: str
     name: str | None = None
     as_of_date: date | None = None
-    method_fallback: bool = False  # 0002 3-3 (스키마 반영 전, #10)
+    method_fallback: bool = False  # 0002 3-3. #44 Context용, 입력 변환 때 ProductResult.method_fallback(#58)으로
     risk_basis: str = "SKU"  # 0002 3-8
     no_date_receipt_qty: int = 0  # 0002 3-8
     result: ProductResult
@@ -132,33 +131,20 @@ def all_values(case: EvalCase) -> dict[str, str]:
     return v
 
 
-def _dir(a: int, b: int) -> str:
-    """표시 규칙으로 바꾼 정수끼리 비교 (#4 문서 6-4, tests/insight_fallback._cmp와 같음)."""
-    return "높음" if a > b else "낮음" if a < b else "같음"
+def to_input(case: EvalCase) -> InsightInput | None:
+    """서비스와 같은 입력: #59 to_insight_input(). result에 값이 없으면 EvalCase의 계산 밖 값을 #58 필드로 넣는다.
 
-
-def to_input(case: EvalCase) -> InsightInput:
-    """to_insight_input() 대신 (#10 "별도 Issue"). 값이 있는 숫자 키 + 화면에 보이는 값으로 비교한 방향(#4 문서 6-4)."""
+    None은 #59의 생성 보류(필수 사실 없음)다. prepare는 이때 LLM을 부르지 않는다 (bank.generate).
+    """
     r = case.result
-    keys = [k for k in all_values(case) if not PHRASE_RE.match(k)]
-    base = case.scenario(ScenarioType.P100)
-    dirs = {}
-    for s in r.scenarios:
-        if s.is_duplicate or s is base or base is None:
-            continue
-        x = s.type.value.lower()
-        dirs[f"ending_{x}_vs_p100"] = _dir(math.floor(s.expected_ending_stock), math.floor(base.expected_ending_stock))
-        if r.risk_status == RiskStatus.OK and s.post_arrival_risk is not None and base.post_arrival_risk is not None:
-            dirs[f"risk_post_{x}_vs_p100"] = _dir(
-                _round(s.post_arrival_risk * 100), _round(base.post_arrival_risk * 100)
-            )
-    return InsightInput(
-        sku_label="(이 상품)",
-        recommended=ScenarioType.P100,
-        placeholders=keys,
-        directions=dirs,
-        risk_status=r.risk_status,
+    r = r.model_copy(
+        update={
+            "method_fallback": case.method_fallback if r.method_fallback is None else r.method_fallback,
+            "risk_basis": RiskBasis(case.risk_basis) if r.risk_basis is None else r.risk_basis,
+            "no_date_receipt_qty": r.no_date_receipt_qty or case.no_date_receipt_qty,
+        }
     )
+    return to_insight_input(r, "(이 상품)", as_of_date=case.as_of_date)
 
 
 def verify_filled(filled: str, values: dict[str, str]) -> tuple[bool, str | None]:
