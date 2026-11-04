@@ -70,8 +70,8 @@ def test_keys_use_contract_names():
     """기본 문장의 자리 표시자 이름은 prompt가 LLM에 주는 이름과 같다 (0002 3-4, #4 문서 5장)."""
     keys = {k for piece in PIECES.values() for k in PLACEHOLDER_RE.findall(piece)}
     keys = {k.replace("_X", "_p80") for k in keys}
-    # 계산 불가 사유는 LLM을 부르지 않아 없음. no_date_receipts는 prompt 설명이 아직 없음 (#4 문서 7장)
-    assert keys - set(KEY_DESCRIPTIONS) == {"reason", "no_date_receipts"}
+    # 계산 불가 사유는 LLM을 부르지 않아 없음
+    assert keys - set(KEY_DESCRIPTIONS) == {"reason"}
 
 
 @pytest.mark.parametrize("case", [c for c in CASES if c["expected"]], ids=lambda c: c["id"])
