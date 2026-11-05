@@ -303,3 +303,24 @@ Spring의 BACKTEST job 생성·저장은 아직 별도이며 이 단계는 AI HT
 
 관련 회귀 검사는 `pytest -q tests/test_insight_evaluation.py tests/test_judge.py`로 실행합니다.
 가짜 응답을 이용한 오프라인 검사이며 실제 LLM 품질·사용자 업무 효과를 검증한 결과는 아닙니다.
+
+## 개발 배포의 동일 SHA 이미지 재사용
+
+`deploy-dev.yml`은 AWS 인증/기존 승인 검사 이후, 배포 역할의 기존 `ecr:BatchGetImage` 권한으로
+현재 workflow SHA 태그를 먼저 조회합니다. onebox는 `<SHA>-arm64`, legacy는 `<SHA>`이며
+계정·서울 리전·저장소·태그가 모두 일치해야 합니다. 다른 SHA/아키텍처/서비스 이미지를 대신 쓰지 않습니다.
+
+- 이미지가 있으면 Docker Buildx 설정과 build/push를 모두 건너뛰고 기존 immutable 이미지를 재사용합니다.
+- `ImageNotFound`가 요청한 정확한 태그에 대해 반환된 경우에만 기존 build/push를 한 번 수행합니다.
+- 권한·통신·저장소 오류, 빈/불완전/모호한 응답은 중단하며 이미지 없음으로 처리하지 않습니다.
+- 빌드 또는 재사용 뒤, task를 읽거나 갱신하기 전에 이미지를 다시 확인합니다. 재사용 중 digest가 바뀌거나
+  이미지가 사라졌으면 중단합니다. 동시 외부 push로 build가 충돌해도 태그를 삭제하거나 덮어쓰지 않습니다.
+
+이미지 존재와 별개로 기존 환경 승인·서비스 재시작·real/LLM 비용 승인은 계속 필요합니다.
+태그 가변 전환·이미지 삭제·새 IAM 권한·실제 배포·LLM 호출은 이 변경에 포함하지 않습니다.
+배포에는 기존과 같은 immutable SHA 태그 URI를 전달하고 확인한 digest는 GitHub step output으로 보존합니다.
+이 workflow 보완을 병합해도 첫 새 SHA는 이미지가 없으므로 빌드하고, 그 SHA의 이후 재배포부터 재사용합니다.
+
+격리 검사: `python3 -m unittest discover -s scripts/testing -p 'test_ecr_image.py' -v`.
+가짜 AWS CLI 응답으로 재사용/신규 빌드 판단·권한/통신 오류 차단·digest 변경·workflow 연결을 검사하며
+실제 AWS 배포 성공을 의미하지 않습니다. [ECR BatchGetImage 계약](https://docs.aws.amazon.com/AmazonECR/latest/APIReference/API_BatchGetImage.html).
