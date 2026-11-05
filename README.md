@@ -44,6 +44,7 @@ ruff check .                     # 코드 검사
 |---|---|---|
 | `ENGINE_MODE` | `mock`이면 명세 예시 응답, `real`이면 실제 계산 | `mock` |
 | `IPGO_EMBEDDED_WORKER_ENABLED` | API 프로세스 안에서 SQS worker 실행 | `false` |
+| `IPGO_ORIGINAL_DATABASE_URL` | DB 원본 전용 ipgo_ai_service_reader 연결. 기존 DATABASE_URL로 대체하지 않음 | 없음 |
 | `DATABASE_URL` | 승인된 view만 조회하는 PostgreSQL read-only 연결 | 없음 |
 | `STORAGE_BASE` | 로컬 개발용 원본 엑셀 root. AWS에서는 S3 설정을 우선 사용 | 없음 |
 | `AWS_REGION` | S3·SQS를 사용할 AWS Region | `ap-northeast-2` |
@@ -185,6 +186,13 @@ HTTP/SQS/직접 입력 경로는 이 context를 자동으로 준비합니다. so
   HTTP 연결 검증은 가짜 상류 위험 상태와 FakeClient를 씁니다. 실제 위험 산출·유료 LLM·업무 전체 흐름 검증과 구분합니다.
 
 ## AWS 데이터 접근 계약
+
+서버 #76의 DB 원본은 [DB 원본 조회 계약](docs/decisions/0005-database-original.md)을 따릅니다.
+`db/` storageKey는 V15의 추가 view에서 소유자·창고·크기·SHA-256을 검증해 읽고, 기존 key는 local/S3를 유지합니다.
+DB 원본에는 `IPGO_ORIGINAL_DATABASE_URL`의 서비스 전용 조회 계정이 필요합니다. 실제 role을 검사하며 기존 `DATABASE_URL`로 대체하지 않습니다.
+DB 원본 자체에는 S3가 필요 없지만 기존 S3 key를 계속 처리하려면 기존 S3 설정을 함께 유지합니다.
+서버의 총256MiB·최소30일보존·신규만DB저장 정책을 따르며 공유/개인 계정에는 원본 권한을 추가하지 않습니다.
+실제 DB migration·배포·기존 파일 이전은 별도 작업입니다.
 
 Spring이 업무 데이터·상태·결과 저장을 소유하고 FastAPI reader는 다음 view를 `SELECT`만 합니다.
 정확한 컬럼·source 선택·권한과 검증 근거는 [조회 전용 view 계약](docs/decisions/0004-reader-view-contract.md)을 따릅니다.

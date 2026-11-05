@@ -21,6 +21,9 @@ AI repository가 확인한다. view에 요청 회원 필터가 자동으로 붙�
 
 ## 조회 목록과 전체 컬럼
 
+Server76/V15의 DB 원본 추가 view는 [0005](0005-database-original.md)에 별도로 정의한다.
+아래 표는 기존 V13/V14의4개 view 계약이며 변경하지 않는다.
+
 | view | migration | 전체 컬럼 |
 |---|---|---|
 | `ai_product_daily_stocks_v1` | V13 | `product_id, warehouse_id, upload_file_id, stock_date, opening_qty, inbound_qty, outbound_qty, adjustment_qty, closing_qty, is_valid_observation` |

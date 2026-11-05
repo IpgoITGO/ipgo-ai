@@ -1,9 +1,53 @@
 """Spring이 제공한 안정된 view를 read-only transaction으로 조회한다."""
+import hashlib
+
 import pandas as pd
 import psycopg
 
 from app.config import get_settings
 from app.errors import AppError
+
+
+def load_upload_original(user_id: int, warehouse_id: int, source) -> bytes:
+    """DB 원본은 소유자·창고·source·상태를 제한한 view에서만 읽는다. 외부 저장소로 fallback하지 않는다."""
+    from app.storage import MAX_SOURCE_BYTES
+    from engine.clean import CleaningInputError
+
+    settings = get_settings()
+    if settings.original_database_url is None:
+        raise AppError(501, "DATABASE_ORIGINAL_NOT_CONFIGURED", "서비스 전용 DB 원본 조회 연결이 설정되지 않았어요")
+    try:
+        with psycopg.connect(settings.original_database_url, autocommit=False, connect_timeout=5) as connection:
+            connection.read_only = True
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = '10s'")
+                    cursor.execute("SELECT current_user")
+                    if cursor.fetchone() != ("ipgo_ai_service_reader",):
+                        raise AppError(403, "DATABASE_ORIGINAL_ROLE_INVALID", "서비스 전용 조회 계정이 필요해요")
+                    cursor.execute("""SELECT size_bytes, sha256, content_type,
+                                             CASE WHEN size_bytes BETWEEN 1 AND %s THEN content END
+                                      FROM ai_upload_originals_v1
+                                      WHERE upload_file_id = %s AND user_id = %s AND warehouse_id = %s
+                                        AND storage_key = %s AND original_name = %s AND status = 'PROCESSING'""",
+                                   (MAX_SOURCE_BYTES, source.upload_file_id, user_id, warehouse_id,
+                                    source.storage_key, source.original_name))
+                    row = cursor.fetchone()
+                    if row is None:
+                        raise CleaningInputError("DB 원본 또는 소유권이 올바르지 않아요")
+                    size, expected_hash, content_type, content = row
+                    if (not isinstance(size, int) or not 0 < size <= MAX_SOURCE_BYTES
+                            or content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            or not isinstance(content, (bytes, memoryview))):
+                        raise CleaningInputError("DB 원본 형식 또는 크기가 올바르지 않아요")
+                    content = bytes(content)
+                    if len(content) != size or hashlib.sha256(content).hexdigest() != expected_hash:
+                        raise CleaningInputError("DB 원본의 크기 또는 해시가 일치하지 않아요")
+            finally:
+                connection.rollback()
+        return content
+    except psycopg.Error as exception:
+        raise AppError(503, "DATABASE_UNAVAILABLE", "DB 원본을 읽지 못했어요") from exception
 
 
 def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,

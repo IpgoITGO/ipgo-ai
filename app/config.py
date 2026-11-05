@@ -18,6 +18,7 @@ class Settings:
     jobs_queue_url: str | None
     results_queue_url: str | None
     risk_enabled: bool = True
+    original_database_url: str | None = None
 
 
 def get_settings() -> Settings:
@@ -32,4 +33,5 @@ def get_settings() -> Settings:
         jobs_queue_url=os.getenv("IPGO_JOBS_QUEUE_URL") or None,
         results_queue_url=os.getenv("IPGO_RESULTS_QUEUE_URL") or None,
         risk_enabled=os.getenv("IPGO_RISK_ENABLED", "true").lower() == "true",
+        original_database_url=os.getenv("IPGO_ORIGINAL_DATABASE_URL") or None,
     )
