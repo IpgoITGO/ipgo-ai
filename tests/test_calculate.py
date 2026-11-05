@@ -160,6 +160,10 @@ def test_fallback_a_to_b_and_both_unavailable():
     [result] = calculate(request, daily).results
     assert result.status is ResultStatus.NOT_CALCULABLE
     assert result.recommended_qty is None and result.reason and not result.scenarios
+    # 사유는 화면 · 인사이트 고정 문장에 그대로 보이므로 계산식 기호와 구간 기호를 쓰지 않는다 (#68).
+    for symbol in ("A:", "B:", ";", "P_H", "C_90", "P_90", "유효 관측일"):
+        assert symbol not in result.reason
+    assert "판매한 날이" in result.reason and not result.reason.endswith(".")
 
 
 def test_fallback_b_to_a_when_only_recent_observations_are_missing():

@@ -9,6 +9,8 @@ B_WINDOW_MAX = 28       # 기준 B 최대 구간 (기준일 포함)
 A_WINDOW_DAYS = 90      # [가정] 계산식 A 직전 구간 길이 (기획서 [가정: 90일])
 A_MIN_VALID_DAYS = 7    # [가정] 계산식 A 세 구간 각각의 최소 유효일 (5~7월 조정 데이터로 결정)
 TREND_BOUNDS: tuple[float, float] | None = None  # [가정] 추세 비율 상 · 하한 (5~7월 조정 데이터로 결정)
+# 사용 불가 사유는 화면 · 인사이트 고정 문장에 그대로 보이므로 구간 기호 대신 셀러 말로 쓴다 (#68).
+A_WINDOW_LABELS = {"P_H": "작년 같은 기간", "C_90": "최근 90일", "P_90": "작년 같은 날까지 90일"}
 
 
 @dataclass(frozen=True)
@@ -53,12 +55,13 @@ def forecast_a(
     for name, (start, end) in windows.items():
         days, total = _valid_sum(daily, start, end)
         if days < A_MIN_VALID_DAYS:
-            reason = f"{name} 구간({start} ~ {end}) 판매한 날이 {days}일로 {A_MIN_VALID_DAYS}일보다 적어요"
+            reason = f"{A_WINDOW_LABELS[name]}({start} ~ {end}) 판매한 날이 {days}일로 {A_MIN_VALID_DAYS}일보다 적어요"
             return ForecastA(None, reason)
         means[name] = total / days
     p_h, c_90, p_90 = means["P_H"], means["C_90"], means["P_90"]
     if p_90 == 0:
-        return ForecastA(None, "작년 같은 90일 평균 출고가 0이라 추세를 구할 수 없어요", p_h, c_90, p_90)
+        return ForecastA(None, "작년 같은 날까지 90일 동안 판매 기록이 없어 작년 대비 흐름을 구할 수 없어요",
+                         p_h, c_90, p_90)
     trend = c_90 / p_90
     if trend_bounds is not None:
         trend = min(max(trend, trend_bounds[0]), trend_bounds[1])
@@ -73,7 +76,7 @@ def forecast_b(product_daily: pd.DataFrame, as_of: date, forecast_days: int) -> 
     daily = _until(product_daily, as_of)
     days, total = _valid_sum(daily, as_of - timedelta(days=B_WINDOW_MAX - 1), as_of)
     if days < MIN_VALID_DAYS:
-        reason = f"최근 {B_WINDOW_MAX}일 중 판매한 날(유효 관측일)이 {days}일로 {MIN_VALID_DAYS}일보다 적어요"
+        reason = f"최근 {B_WINDOW_MAX}일 중 판매한 날이 {days}일로 {MIN_VALID_DAYS}일보다 적어요"
         return ForecastB(None, reason, days, total)
     mean = total / days
     return ForecastB(mean * forecast_days, None, days, total, mean)
