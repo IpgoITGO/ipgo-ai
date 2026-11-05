@@ -17,6 +17,7 @@ MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 class Cursor:
     def __init__(self, row):
         self.row = row
+        self.role = "ipgo_ai_service_reader"
         self.queries = []
 
     def __enter__(self):
@@ -29,6 +30,8 @@ class Cursor:
         self.queries.append((query, params))
 
     def fetchone(self):
+        if self.queries[-1][0] == "SELECT current_user":
+            return (self.role,)
         return self.row
 
 
@@ -36,7 +39,11 @@ def setup(monkeypatch, row):
     cursor = Cursor(row)
     connection = Connection(cursor)
     monkeypatch.setenv("DATABASE_URL", "postgresql://reader@fake/ipgo")
-    monkeypatch.setattr(repository.psycopg, "connect", lambda *_a, **_kw: connection)
+    monkeypatch.setenv("IPGO_ORIGINAL_DATABASE_URL", "postgresql://ipgo_ai_service_reader@fake/ipgo")
+    def connect(dsn, **_kw):
+        assert dsn == "postgresql://ipgo_ai_service_reader@fake/ipgo"
+        return connection
+    monkeypatch.setattr(repository.psycopg, "connect", connect)
     return connection, cursor
 
 
@@ -61,9 +68,22 @@ def test_invalid_or_mismatched_database_source_is_permanent_failure(monkeypatch,
 
 
 def test_missing_database_does_not_read_external_source(monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://legacy-reader@fake/ipgo")
+    monkeypatch.delenv("IPGO_ORIGINAL_DATABASE_URL", raising=False)
+    monkeypatch.setattr(repository.psycopg, "connect", lambda *_a, **_kw: pytest.fail("legacy login used"))
     with pytest.raises(AppError):
         repository.load_upload_original(3, 4, SOURCE)
+
+
+@pytest.mark.parametrize("role", ["ipgo_ai_reader", "ipgo_server", "ipgo_admin"])
+def test_shared_or_privileged_login_cannot_read_original(monkeypatch, role):
+    connection, cursor = setup(monkeypatch, None)
+    cursor.role = role
+    with pytest.raises(AppError) as error:
+        repository.load_upload_original(3, 4, SOURCE)
+    assert error.value.code == "DATABASE_ORIGINAL_ROLE_INVALID"
+    assert connection.rolled_back
+    assert not any("FROM ai_upload_originals_v1" in query for query, _ in cursor.queries)
 
 
 def test_clean_job_db_route_uses_real_cleaning_without_local_or_s3(monkeypatch):

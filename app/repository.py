@@ -14,14 +14,17 @@ def load_upload_original(user_id: int, warehouse_id: int, source) -> bytes:
     from engine.clean import CleaningInputError
 
     settings = get_settings()
-    if settings.database_url is None:
-        raise AppError(501, "DATABASE_NOT_CONFIGURED", "DB 원본 조회 연결이 설정되지 않았어요")
+    if settings.original_database_url is None:
+        raise AppError(501, "DATABASE_ORIGINAL_NOT_CONFIGURED", "서비스 전용 DB 원본 조회 연결이 설정되지 않았어요")
     try:
-        with psycopg.connect(settings.database_url, autocommit=False, connect_timeout=5) as connection:
+        with psycopg.connect(settings.original_database_url, autocommit=False, connect_timeout=5) as connection:
             connection.read_only = True
             try:
                 with connection.cursor() as cursor:
                     cursor.execute("SET LOCAL statement_timeout = '10s'")
+                    cursor.execute("SELECT current_user")
+                    if cursor.fetchone() != ("ipgo_ai_service_reader",):
+                        raise AppError(403, "DATABASE_ORIGINAL_ROLE_INVALID", "서비스 전용 조회 계정이 필요해요")
                     cursor.execute("""SELECT size_bytes, sha256, content_type,
                                              CASE WHEN size_bytes BETWEEN 1 AND %s THEN content END
                                       FROM ai_upload_originals_v1
