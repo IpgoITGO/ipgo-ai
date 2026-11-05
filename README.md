@@ -186,6 +186,11 @@ HTTP/SQS/직접 입력 경로는 이 context를 자동으로 준비합니다. so
 
 ## AWS 데이터 접근 계약
 
+서버 #76의 DB 원본은 [DB 원본 조회 계약](docs/decisions/0005-database-original.md)을 따릅니다.
+`db/` storageKey는 V15의 추가 view에서 소유자·창고·크기·SHA-256을 검증해 읽고, 기존 key는 local/S3를 유지합니다.
+DB 원본에는 `STORAGE_BASE`나 S3가 필요하지 않으며 `DATABASE_URL`의 조회 전용 권한이 필요합니다.
+실제 DB migration·배포·기존 파일 이전은 별도 작업입니다.
+
 Spring이 업무 데이터·상태·결과 저장을 소유하고 FastAPI reader는 다음 view를 `SELECT`만 합니다.
 정확한 컬럼·source 선택·권한과 검증 근거는 [조회 전용 view 계약](docs/decisions/0004-reader-view-contract.md)을 따릅니다.
 

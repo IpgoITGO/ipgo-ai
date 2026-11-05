@@ -79,5 +79,6 @@ def clean_request(request: CleanRequest):
         raise cleaning.CleaningInputError("업로드 식별자가 일치하지 않아요")
     known, previous, period = repository.load_cleaning_context(
         request.user_id, request.warehouse_id, request.upload_id, request.previous_upload_file_id, source)
-    content = storage.read_source_file(source)
+    content = (repository.load_upload_original(request.user_id, request.warehouse_id, source)
+               if source.storage_key and source.storage_key.startswith("db/") else storage.read_source_file(source))
     return cleaning.clean([(source, content)], known, previous, period)
