@@ -63,23 +63,27 @@ def _not_calculable(product_id: int, reason: str, valid_days: int | None = None)
 def _product(
     request: CalculateRequest, daily: pd.DataFrame, product_id: int, settings: ProductSettings | None,
 ) -> tuple[ProductResult, dict[int, float]]:
+    # 사유는 화면 · 인사이트 고정 문장에 그대로 보이므로 셀러가 할 일을 알 수 있는 말로 쓴다 (#68).
+    # Spring은 입고 조건이나 원가가 비면 settings를 보내지 않는다.
     if settings is None:
-        return _not_calculable(product_id, "상품의 입고 설정이 없어요")
+        return _not_calculable(product_id, "입고 조건이나 원가가 비어 있어요. 입고 조건 화면에서 확인해 주세요")
     daily = daily[daily["product_id"] == product_id]
     if daily.empty:
-        return _not_calculable(product_id, "선택한 업로드에 기준일까지의 상품 기록이 없어요", 0)
+        return _not_calculable(product_id, "기준일까지 이 상품의 수불부 기록이 없어요", 0)
     if daily["stock_date"].duplicated().any():
-        return _not_calculable(product_id, "같은 날짜의 상품 기록이 중복됐어요. 유효한 업로드를 확인해 주세요")
+        return _not_calculable(product_id, "같은 날짜 기록이 두 번 있어요. 겹친 수불부를 확인해 주세요")
     quantities = daily[["outbound_qty", "closing_qty"]].apply(pd.to_numeric, errors="coerce")
     if quantities.isna().any().any() or not ((quantities >= 0) & (quantities < float("inf"))).all().all():
-        return _not_calculable(product_id, "출고량과 기말 재고는 0 이상의 유한한 숫자여야 해요")
+        return _not_calculable(product_id, "출고나 재고에 음수 · 빈 값이 있어요. 수불부를 확인해 주세요")
     if not daily["is_valid_observation"].map(lambda value: isinstance(value, bool)).all():
-        return _not_calculable(product_id, "유효 관측일 판정이 없는 기록이 있어요")
+        return _not_calculable(product_id, "계산 준비가 덜 된 기록이 있어요. 다시 계산해 주세요")
     daily = daily.assign(**{column: quantities[column] for column in quantities})
     valid_days = int(daily["is_valid_observation"].sum())
     closing = daily.loc[daily["stock_date"] == request.as_of_date, "closing_qty"]
     if closing.empty:
-        return _not_calculable(product_id, "기준일의 기말 재고 기록이 없어요", valid_days)
+        return _not_calculable(
+            product_id, "기준일 재고가 비어 있어요. 수불부 마지막 날 재고를 확인해 주세요", valid_days,
+        )
 
     horizon = settings.lead_time_days + settings.review_cycle_days
     gap = (request.today - request.as_of_date).days
@@ -92,9 +96,8 @@ def _product(
         alternate = Method.B if method is Method.A else Method.A
         forecast = forecasts[alternate](daily, request.as_of_date, gap + horizon)
         if forecast.qty is None:
-            return _not_calculable(
-                product_id, f"{method.value}: {first_reason}; {alternate.value}: {forecast.reason}", valid_days,
-            )
+            # 계산식 기호(A · B) 없이 두 사유를 문장으로 잇는다. 끝 마침표는 붙이지 않는다(인사이트 {{reason}}).
+            return _not_calculable(product_id, f"{first_reason}. {forecast.reason}", valid_days)
         method_reason = f"기본 방식 {method.value} 사용 불가({first_reason})로 {alternate.value} 사용"
         method = alternate
 
