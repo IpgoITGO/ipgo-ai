@@ -1,5 +1,7 @@
 # Ipgo AI
 
+지속 LLM의 요청 상한과 Server 월별 비용 제한 연동은 [지속 호출 제한](docs/decisions/0011-continuous-insight-limits.md)을 따릅니다. 기본은OFF이며 로컬 구현이 실제 활성화를 의미하지 않습니다.
+
 입고ITGO의 FastAPI 서버입니다. 수불부 정제 · 입고 계산 엔진과 AI 인사이트를 담당합니다.
 Spring Boot 백엔드가 이 서버를 호출하고, 계산 결과 저장은 백엔드가 합니다.
 

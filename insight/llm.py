@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
 import openai
 
 from insight.demo_window import options as demo_options
@@ -75,7 +76,8 @@ class OpenAIClient:
         self.timeout_sec = timeout_sec or float(os.getenv("LLM_TIMEOUT_SEC") or DEFAULT_TIMEOUT_SEC)
         # SDK 자체 재시도를 끈다 (단일 호출)
         self._client = openai.OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"), timeout=self.timeout_sec,
-                                     max_retries=0)
+                                     max_retries=0,
+                                     http_client=httpx.Client(follow_redirects=False, timeout=self.timeout_sec))
 
     def complete(self, system: str, user: str, *, max_tokens: int = 400, temperature: float = 0.2) -> LLMResult:
         t0 = time.perf_counter()

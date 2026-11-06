@@ -78,3 +78,12 @@ def test_deadline_and_exact_sha_gate():
     assert gate(**real, IPGO_LLM_EXPIRES_AT='2000-01-01T00:00:00Z') != 0
     assert gate(**real, IPGO_LLM_EXPIRES_AT='2026-11-06T08:30:00') != 0
     assert gate(**real, EXPECTED_SHA='b'*40) != 0
+
+
+def test_continuous_requires_cost_approval_but_no_demo_deadline():
+    real = dict(ENGINE_MODE='real', EMBEDDED_WORKER_ENABLED='true', REAL_CAPACITY_APPROVED='true',
+                LLM_ENABLED='true', LLM_APPROVED='true', CONTINUOUS_LLM_APPROVED='true', IPGO_LLM_EXPIRES_AT='')
+    assert gate(**real) == 0
+    assert gate(**(real | {'LLM_APPROVED':'false'})) != 0
+    assert gate(**(real | {'LLM_ENABLED':'false'})) != 0
+    assert gate(**(real | {'CONTINUOUS_LLM_APPROVED':'false'})) != 0

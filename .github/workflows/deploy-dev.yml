@@ -12,6 +12,11 @@ on:
         description: "Full approved commit SHA"
         required: true
         type: string
+      continuous_llm_approved:
+        description: "Approve ongoing LLM only with the Server USD10 monthly budget guard deployed"
+        required: false
+        default: false
+        type: boolean
       llm_expires_at:
         description: "UTC deadline for new LLM calls (within 24h when enabled)"
         required: false
@@ -76,6 +81,7 @@ jobs:
     env:
       DEPLOYMENT_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       EXPECTED_SHA: ${{ inputs.expected_sha }}
+      CONTINUOUS_LLM_APPROVED: ${{ inputs.continuous_llm_approved }}
       IPGO_LLM_EXPIRES_AT: ${{ inputs.llm_expires_at }}
       COMPUTE_MODE: ${{ vars.AWS_DEV_COMPUTE_MODE }}
       ECS_SERVICE_NAME: ${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && 'ipgo-dev-onebox-ai-api' || 'ipgo-dev-ai-api' }}
@@ -99,7 +105,9 @@ jobs:
           import os
           from datetime import datetime, timezone
           assert os.environ['EXPECTED_SHA'] == os.environ['DEPLOYMENT_SOURCE_SHA'], 'Approved SHA mismatch'
-          if os.environ['LLM_ENABLED'] == 'true':
+          if os.environ.get('CONTINUOUS_LLM_APPROVED', 'false') == 'true':
+              assert os.environ['LLM_ENABLED'] == 'true' and os.environ['LLM_APPROVED'] == 'true', 'Continuous LLM requires cost approval'
+          if os.environ['LLM_ENABLED'] == 'true' and os.environ.get('CONTINUOUS_LLM_APPROVED', 'false') != 'true':
               end = datetime.fromisoformat(os.environ['IPGO_LLM_EXPIRES_AT'].replace('Z', '+00:00'))
               assert end.tzinfo is not None and 0 < (end-datetime.now(timezone.utc)).total_seconds() <= 86400, 'Invalid LLM expiry'
           PYVALIDATE
@@ -252,6 +260,7 @@ jobs:
           container-name: ai-api
           image: ${{ steps.verified_image.outputs.image }}
           environment-variables: |
+            IPGO_LLM_CONTINUOUS_ENABLED=${{ inputs.llm_enabled && inputs.continuous_llm_approved }}
             IPGO_LLM_EXPIRES_AT=${{ inputs.llm_expires_at }}
             ENGINE_MODE=${{ inputs.engine_mode }}
             IPGO_EMBEDDED_WORKER_ENABLED=${{ inputs.embedded_worker_enabled }}
