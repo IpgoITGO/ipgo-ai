@@ -41,9 +41,9 @@ class LLMTimeout(LLMError):
 @dataclass
 class LLMResult:
     text: str
-    model: str            # 응답이 알려 준 모델 이름 (스냅샷 포함)
-    input_tokens: int
-    output_tokens: int
+    model: str | None     # 응답이 알려 준 모델 이름 (스냅샷 포함), 미수신은 None
+    input_tokens: int | None
+    output_tokens: int | None
     latency_ms: int
     cost_usd: float | None  # 단가를 모르는 모델이면 None
     truncated: bool       # max_tokens에서 잘림
@@ -55,8 +55,8 @@ class LLMClient(Protocol):
     def complete(self, system: str, user: str, *, max_tokens: int = 400, temperature: float = 0.2) -> LLMResult: ...
 
 
-def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
-    if model not in PRICES_PER_1M:
+def estimate_cost(model: str, input_tokens: int | None, output_tokens: int | None) -> float | None:
+    if model not in PRICES_PER_1M or input_tokens is None or output_tokens is None:
         return None
     pin, pout = PRICES_PER_1M[model]
     return round((input_tokens * pin + output_tokens * pout) / 1e6, 6)
@@ -91,9 +91,9 @@ class OpenAIClient:
             raise LLMError(f"{type(e).__name__}: {e}", _elapsed_ms(t0)) from e
         latency = _elapsed_ms(t0)
         choice = resp.choices[0]
-        it = getattr(resp.usage, "prompt_tokens", 0) or 0
-        ot = getattr(resp.usage, "completion_tokens", 0) or 0
-        return LLMResult((choice.message.content or "").strip(), resp.model or self.model, it, ot, latency,
+        it = getattr(resp.usage, "prompt_tokens", None)
+        ot = getattr(resp.usage, "completion_tokens", None)
+        return LLMResult((choice.message.content or "").strip(), resp.model or None, it, ot, latency,
                          estimate_cost(self.model, it, ot), choice.finish_reason == "length")
 
 

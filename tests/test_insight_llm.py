@@ -95,3 +95,21 @@ def test_fake_client_raises_queued_error():
     with pytest.raises(LLMTimeout):
         c.complete("s", "u")
     assert len(c.calls) == 2
+
+
+@pytest.mark.parametrize("usage", [None, SimpleNamespace(prompt_tokens=None, completion_tokens=None)])
+def test_missing_usage_stays_unknown(monkeypatch, usage):
+    response = _resp("ok")
+    response.usage = usage
+    r = _client(monkeypatch, lambda **kw: response).complete("sys", "user")
+    assert r.input_tokens is None and r.output_tokens is None and r.cost_usd is None
+
+
+def test_observed_zero_usage_is_distinct_from_missing_usage(monkeypatch):
+    r = _client(monkeypatch, lambda **kw: _resp("ok", it=0, ot=0)).complete("sys", "user")
+    assert (r.input_tokens, r.output_tokens, r.cost_usd) == (0, 0, 0)
+
+
+def test_missing_response_model_is_not_replaced_by_requested_model(monkeypatch):
+    r = _client(monkeypatch, lambda **kw: _resp("ok", model=None)).complete("sys", "user")
+    assert r.model is None

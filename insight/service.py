@@ -6,7 +6,7 @@
 """
 import logging
 
-from insight.llm import LLMClient, LLMError
+from insight.llm import LLMClient, LLMError, LLMResult
 from insight.prompt import PROMPT_VERSION, build_prompt, draft_text
 from insight.validator import check_draft
 from schemas.insight import FailReason, InsightInput, InsightResponse, Validation
@@ -14,10 +14,17 @@ from schemas.insight import FailReason, InsightInput, InsightResponse, Validatio
 logger = logging.getLogger(__name__)
 
 
-def _failed(reason: FailReason, latency_ms: int, cost_usd: float | None) -> InsightResponse:
-    # cost_usd는 계약상 필수. 호출 오류 · 시간 초과처럼 모르면 0 (응답 필드 보강은 #10)
+def _failed(reason: FailReason, latency_ms: int, result: LLMResult | None = None) -> InsightResponse:
+    # Only a received provider result can supply actual model and usage.
     return InsightResponse(validation=Validation.FAILED, draft=None, fail_reason=reason,
-                           latency_ms=latency_ms, cost_usd=cost_usd or 0.0, prompt_version=PROMPT_VERSION)
+                           latency_ms=latency_ms, prompt_version=PROMPT_VERSION, **_metadata(result))
+
+
+def _metadata(result: LLMResult | None) -> dict:
+    if result is None:
+        return {"model_name": None, "input_tokens": None, "output_tokens": None, "cost_usd": None}
+    return {"model_name": result.model, "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens, "cost_usd": result.cost_usd}
 
 
 def generate_insight(inp: InsightInput, client: LLMClient) -> InsightResponse:
@@ -34,10 +41,10 @@ def generate_insight(inp: InsightInput, client: LLMClient) -> InsightResponse:
     if text is not None:
         result = check_draft(text, prompt.allowed, prompt.required)
         detail = None if result.ok else result.violations[0].code
-    logger.info("insight %s detail=%s model=%s latency_ms=%d tokens=%d/%d cost_usd=%s prompt=%s",
+    logger.info("insight %s detail=%s model=%s latency_ms=%d tokens=%s/%s cost_usd=%s prompt=%s",
                 "passed" if detail is None else "failed", detail, r.model, r.latency_ms,
                 r.input_tokens, r.output_tokens, r.cost_usd, PROMPT_VERSION)
     if detail is not None:
-        return _failed(FailReason.VALIDATION_FAILED, r.latency_ms, r.cost_usd)
+        return _failed(FailReason.VALIDATION_FAILED, r.latency_ms, r)
     return InsightResponse(validation=Validation.PASSED, draft=text, fail_reason=None,
-                           latency_ms=r.latency_ms, cost_usd=r.cost_usd or 0.0, prompt_version=PROMPT_VERSION)
+                           latency_ms=r.latency_ms, prompt_version=PROMPT_VERSION, **_metadata(r))

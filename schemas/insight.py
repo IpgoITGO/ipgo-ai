@@ -54,6 +54,9 @@ class InsightResponse(CamelModel):
     validation: Validation
     draft: str | None                       # 자리 표시자가 들어간 문장 초안 (통과했을 때)
     fail_reason: FailReason | None = None
-    latency_ms: int
-    cost_usd: float
+    latency_ms: int = Field(ge=0, strict=True)
+    cost_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    model_name: str | None = Field(default=None, min_length=1, max_length=100)
+    input_tokens: int | None = Field(default=None, ge=0, strict=True)
+    output_tokens: int | None = Field(default=None, ge=0, strict=True)
     prompt_version: str = Field(min_length=1)  # 실제 서비스의 PROMPT_VERSION, 모의 응답은 "mock"

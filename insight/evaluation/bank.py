@@ -67,8 +67,8 @@ class GenResult:
     called: bool  # LLM을 불렀는지 (참조 구현 attempts가 있는지)
     model: str | None = None
     latency_ms: int | None = None
-    input_tokens: int = 0
-    output_tokens: int = 0
+    input_tokens: int | None = 0
+    output_tokens: int | None = 0
     cost_usd: float | None = None
     versions: dict = field(default_factory=dict)
 
@@ -102,8 +102,8 @@ def generate(case: EvalCase, client: LLMClient) -> GenResult:
             called,
             model=last.model if last else None,
             latency_ms=resp.latency_ms if resp else None,
-            input_tokens=last.input_tokens if last else 0,
-            output_tokens=last.output_tokens if last else 0,
+            input_tokens=last.input_tokens if last else (None if called else 0),
+            output_tokens=last.output_tokens if last else (None if called else 0),
             cost_usd=last.cost_usd if last else None,
             versions=versions | {"model": last.model if last else None},
         )
@@ -279,8 +279,10 @@ def offline_report(outs: list[GenResult], cfg: Config, runs: int) -> dict:
         "final_text_number_mismatch": mismatch,
         "latency_ms": {"p50": _p(lat, 0.5), "p95": _p(lat, 0.95), "mean": round(statistics.mean(lat)) if lat else None},
         "tokens": {
-            "input_total": sum(o.input_tokens for o in called),
-            "output_total": sum(o.output_tokens for o in called),
+            "input_total": (sum(o.input_tokens for o in called)
+                            if all(o.input_tokens is not None for o in called) else None),
+            "output_total": (sum(o.output_tokens for o in called)
+                             if all(o.output_tokens is not None for o in called) else None),
         },
         "cost_usd": (
             {"total": round(sum(costs), 6), "per_call_mean": round(sum(costs) / n, 6)}
