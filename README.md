@@ -1,5 +1,7 @@
 # Ipgo AI
 
+LLM의 OpenAI SDK와 httpx는 배포 의존성에 포함하며 CI에서 실제 runtime 이미지의 앱 import와 client 초기화를 외부 호출 없이 검사합니다.
+
 지속 LLM의 요청 제한과 월 비용 상한 해제 승인 범위는 [지속 LLM 정책](docs/decisions/0011-continuous-insight-limits.md)을 따릅니다. 기본은OFF이며 코드 구현과 실제 활성화는 구분합니다.
 
 입고ITGO의 FastAPI 서버입니다. 수불부 정제 · 입고 계산 엔진과 AI 인사이트를 담당합니다.
