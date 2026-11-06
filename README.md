@@ -332,3 +332,13 @@ Spring의 BACKTEST job 생성·저장은 아직 별도이며 이 단계는 AI HT
 격리 검사: `python3 -m unittest discover -s scripts/testing -p 'test_ecr_image.py' -v`.
 가짜 AWS CLI 응답으로 재사용/신규 빌드 판단·권한/통신 오류 차단·digest 변경·workflow 연결을 검사하며
 실제 AWS 배포 성공을 의미하지 않습니다. [ECR BatchGetImage 계약](https://docs.aws.amazon.com/AmazonECR/latest/APIReference/API_BatchGetImage.html).
+
+## 입고 주기 제안 (#92)
+
+실제 정제는 파일 안에서 검산을 통과한 SKU별 양수 입고 날짜를 모읍니다.
+같은 날 여러 LOT는 한 날짜로 세고, SKU별 서로 다른 입고일이 3개 이상일 때
+연속 간격의 중앙값을 계산합니다. 유효 SKU 중앙값들의 중앙값을 0.5 올림해
+`estimatedReviewCycleDays`로 반환하며 표본이 부족하면 null입니다.
+수요 관측 flag가 false인 첫 입고도 물리 검산이 맞으면 포함합니다.
+다른 SKU 입고일을 섞거나 월 경계/누적 기록을 추정하지 않습니다.
+기존 보고서를 자동 재처리하지 않으며 사용자가 확정한 입고 조건은 서버가 보존합니다.
