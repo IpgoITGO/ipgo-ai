@@ -43,6 +43,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Build runtime image
         run: docker build --tag ipgo-ai:ci .
+      - name: Import application and construct provider client from runtime image
+        run: >-
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m
+          --entrypoint python ipgo-ai:ci -c
+          "import app.main; from insight.llm import OpenAIClient; client = OpenAIClient(api_key='fixture-only'); client._client.close()"
 
 
   arm-capacity:
