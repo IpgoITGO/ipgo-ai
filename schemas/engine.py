@@ -9,6 +9,7 @@
   화면 표시용 정수 변환은 엔진이 하지 않는다 (docs/decisions/0001).
 """
 from datetime import date
+from typing import Literal
 
 from pydantic import Field, model_validator
 
@@ -194,6 +195,30 @@ class ScenarioResult(CamelModel):
 _REASON_REQUIRED = {ResultStatus.NOT_CALCULABLE, ResultStatus.EXCLUDED, ResultStatus.REUPLOAD_REQUIRED}
 
 
+class AccuracyHistoryPoint(CamelModel):
+    origin_date: date
+    forecast_qty: float
+    actual_qty: float
+    covered: bool
+
+
+class AccuracyEvaluation(CamelModel):
+    """현재 계산 조건의 과거 재생. 실제 발행 예측의 성과가 아니다."""
+    schema_version: Literal[1] = 1
+    status: Literal["AVAILABLE", "EMPTY", "UNAVAILABLE"]
+    reason: str | None = None
+    period_start: date | None = None
+    period_end: date | None = None
+    observed_through: date
+    horizon_days: int | None = None
+    method: Method | None = None
+    multiplier: float
+    policy_version: str | None = None
+    policy_hash: str | None = None
+    data_hash: str
+    history: list[AccuracyHistoryPoint] = Field(default_factory=list)
+
+
 class ProductResult(CamelModel):
     """SKU 하나의 계산 결과 → calculation_results 1행 + scenario_results N행."""
 
@@ -224,6 +249,9 @@ class ProductResult(CamelModel):
     risk_basis: RiskBasis | None = None     # DA-07 미산출은 SKU/POOLED로 추측하지 않는다.
     no_date_receipt_qty: int = Field(default=0, ge=0)
     insight_input: InsightInput | None = None  # #36 변환기: 위험/필수 사실 미산출은 null 유지
+
+    accuracy_history: list[AccuracyHistoryPoint] = Field(default_factory=list, exclude=True)
+    accuracy_evaluation: AccuracyEvaluation | None = None
 
     # 정확도 (DA-13). 유효 관측일 7일 미만이면 grade 없이 NOT_CALCULABLE
     accuracy_grade: AccuracyGrade | None = None
@@ -315,13 +343,6 @@ class ActualInboundComparison(CamelModel):
     engine_average_stock: float
     actual_shortage_days: int
     actual_average_stock: float
-
-
-class AccuracyHistoryPoint(CamelModel):
-    origin_date: date
-    forecast_qty: float
-    actual_qty: float
-    covered: bool
 
 
 class SkuAccuracy(CamelModel):

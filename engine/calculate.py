@@ -201,6 +201,7 @@ def _apply_accuracy(result, request, settings, context, indexed):
     accuracy = accuracy_for(result.product_id, result.valid_observation_days, cases, settings,
                             request.policy.multiplier, result.method, result.horizon_days, context,
                             request.as_of_date)
+    result.accuracy_history = accuracy.history
     result.accuracy_grade = accuracy.grade
     result.cover_success_count = accuracy.cover_success_count
     result.cover_trial_count = accuracy.cover_trial_count
