@@ -88,7 +88,10 @@ def test_calculation_matches_da04_hand_calculations(case):
     if not int(qty):
         assert result.expected_shortage_on is None
     elif result.expected_shortage_on is not None:
-        assert request.today < result.expected_shortage_on <= request.today + timedelta(days=result.horizon_days)
+        assert request.as_of_date <= result.expected_shortage_on <= request.today + timedelta(days=result.horizon_days)
+        # 오늘 이하 날짜는 시작 재고가 이미 0일 때만 나온다(#72).
+        if result.expected_shortage_on <= request.today:
+            assert result.start_stock_qty == 0
     assert result.risk_status is None and result.pre_arrival_risk is None and result.risk_sample_size is None
     assert result.accuracy_grade is not None and result.cover_trial_count is None
     pd.testing.assert_frame_equal(daily, original)
@@ -312,6 +315,38 @@ def test_no_new_order_shortage_date_matches_constant_daily_hand_calculation():
     request = request_for(date(2026, 10, 31), date(2026, 11, 2), horizon=12, lead=5)
     [result] = calculate(request, daily_rows(101, request.as_of_date, 5, 45)).results
     assert result.recommended_qty == 25
+    assert result.expected_shortage_on == date(2026, 11, 9)
+
+
+def test_stock_already_gone_reports_past_date_instead_of_tomorrow():
+    # #72: 기준일 10/31 기말 8개, 하루 5개 → 11/1 3개, 11/2 0개. 11/6에 계산해도 11/7이 아니라 11/2다.
+    request = request_for(date(2026, 10, 31), date(2026, 11, 6), horizon=12, lead=5)
+    [result] = calculate(request, daily_rows(101, request.as_of_date, 5, 8)).results
+    assert result.start_stock_qty == 0
+    assert result.expected_shortage_on == date(2026, 11, 2)
+
+
+def test_zero_closing_on_as_of_date_reports_as_of_date():
+    # 기준일 기말이 이미 0이면 기록상 그날 바닥났다.
+    request = request_for(date(2026, 10, 31), date(2026, 11, 6), horizon=12, lead=5)
+    [result] = calculate(request, daily_rows(101, request.as_of_date, 5, 0)).results
+    assert result.expected_shortage_on == date(2026, 10, 31)
+
+
+def test_restock_in_gap_reports_last_time_stock_ran_out():
+    # 11/1 0개 → 11/3 20개 도착으로 15개 → 11/4 10 → 11/5 5 → 11/6 0. 다시 바닥난 11/6을 준다.
+    request = request_for(date(2026, 10, 31), date(2026, 11, 6), horizon=12, lead=5,
+                          receipts=[(date(2026, 11, 3), 20)])
+    [result] = calculate(request, daily_rows(101, request.as_of_date, 5, 5)).results
+    assert result.start_stock_qty == 0
+    assert result.expected_shortage_on == date(2026, 11, 6)
+
+
+def test_stock_left_today_keeps_future_shortage_date():
+    # 오늘 재고가 남아 있으면 기존처럼 오늘 이후 첫 소진일이다: 45 − 6일×5 = 15 → 11/9.
+    request = request_for(date(2026, 10, 31), date(2026, 11, 6), horizon=12, lead=5)
+    [result] = calculate(request, daily_rows(101, request.as_of_date, 5, 45)).results
+    assert result.start_stock_qty == 15
     assert result.expected_shortage_on == date(2026, 11, 9)
 
 

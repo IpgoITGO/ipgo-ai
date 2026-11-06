@@ -7,7 +7,14 @@ from engine import ENGINE_VERSION
 from engine.accuracy import empirical_range, grade
 from engine.forecast import forecast_a, forecast_b
 from engine.insight_facts import to_insight_input
-from engine.replenish import required_qty, round_to_order_unit, split_forecast, split_planned_receipts, start_stock
+from engine.replenish import (
+    required_qty,
+    round_to_order_unit,
+    split_forecast,
+    split_planned_receipts,
+    start_stock,
+    stockout_since,
+)
 from engine.risk import RiskContext, select_risk_samples
 from engine.scenario import simulate, stockout_risk
 from schemas.base import Method, ResultStatus, RiskStatus, ScenarioType
@@ -114,7 +121,12 @@ def _product(
 
     # Reuse the tested no-new-order simulation (existing receipts still apply).
     # This is the first zero closing stock within this calculation's coverage window.
-    shortage = request.today + timedelta(days=baseline.depletion_day) if qty and baseline.depletion_day else None
+    # 오늘 시작 재고가 이미 0이면 "오늘+1"이 아니라 기준일부터 따라가 바닥난 날(오늘 이하)을 준다(#72).
+    past = None
+    if stock <= 0:
+        past = stockout_since(request.as_of_date, float(closing.iloc[0]), daily_forecast, gap, before)
+    future = request.today + timedelta(days=baseline.depletion_day) if baseline.depletion_day else None
+    shortage = (past or future) if qty else None
     # DA07은 명시한 context가 있을 때 후속 조립한다. DA13 등급은 별도다.
     return ProductResult(
         product_id=product_id, status=ResultStatus.OK if qty else ResultStatus.NOT_NEEDED,
