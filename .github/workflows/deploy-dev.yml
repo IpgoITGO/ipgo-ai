@@ -3,6 +3,20 @@ name: Deploy AI to AWS dev
 on:
   workflow_dispatch:
     inputs:
+      source_sha:
+        description: "Optional exact source commit already merged into dev; preserves the deployed baseline"
+        required: false
+        default: ""
+        type: string
+      expected_sha:
+        description: "Full approved commit SHA"
+        required: true
+        type: string
+      llm_expires_at:
+        description: "UTC deadline for new LLM calls (within 24h when enabled)"
+        required: false
+        default: ""
+        type: string
       maintenance_approved:
         description: "One-box only: approve the brief service restart after reviewing this deployment"
         required: false
@@ -60,10 +74,13 @@ jobs:
     if: github.ref == 'refs/heads/dev' && vars.AWS_DEPLOY_ROLE_ARN != '' && vars.AWS_ACCOUNT_ID != ''
     runs-on: ${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     env:
+      DEPLOYMENT_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      IPGO_LLM_EXPIRES_AT: ${{ inputs.llm_expires_at }}
       COMPUTE_MODE: ${{ vars.AWS_DEV_COMPUTE_MODE }}
       ECS_SERVICE_NAME: ${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && 'ipgo-dev-onebox-ai-api' || 'ipgo-dev-ai-api' }}
       ECS_TASK_FAMILY: ${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && 'ipgo-dev-onebox-ai-api' || 'ipgo-dev-ai-api' }}
-      IMAGE_TAG: ${{ github.sha }}${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && '-arm64' || '' }}
+      IMAGE_TAG: ${{ inputs.source_sha || github.sha }}${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && '-arm64' || '' }}
     environment: dev
     steps:
       - name: Check deployment mode and maintenance approval
@@ -78,6 +95,14 @@ jobs:
           WORKER_DESIRED_COUNT: ${{ inputs.worker_desired_count }}
         shell: bash
         run: |
+          python3 - <<'PYVALIDATE'
+          import os
+          from datetime import datetime, timezone
+          assert os.environ['EXPECTED_SHA'] == os.environ['DEPLOYMENT_SOURCE_SHA'], 'Approved SHA mismatch'
+          if os.environ['LLM_ENABLED'] == 'true':
+              end = datetime.fromisoformat(os.environ['IPGO_LLM_EXPIRES_AT'].replace('Z', '+00:00'))
+              assert end.tzinfo is not None and 0 < (end-datetime.now(timezone.utc)).total_seconds() <= 86400, 'Invalid LLM expiry'
+          PYVALIDATE
           if [[ "$LLM_ENABLED" == true && ( "$ENGINE_MODE" != real || "$LLM_APPROVED" != true ) ]]; then
             echo '::error::LLM requires real mode and separate LLM approval.'
             exit 1
@@ -110,6 +135,15 @@ jobs:
             *) echo '::error::AWS_DEV_COMPUTE_MODE must be onebox, legacy, or unset.'; exit 1 ;;
           esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+          fetch-depth: 0
+      - name: Verify exact approved source merged into dev
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git fetch origin dev
+          git merge-base --is-ancestor HEAD origin/dev
+
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
         with:
           aws-region: ap-northeast-2
@@ -218,6 +252,7 @@ jobs:
           container-name: ai-api
           image: ${{ steps.verified_image.outputs.image }}
           environment-variables: |
+            IPGO_LLM_EXPIRES_AT=${{ inputs.llm_expires_at }}
             ENGINE_MODE=${{ inputs.engine_mode }}
             IPGO_EMBEDDED_WORKER_ENABLED=${{ inputs.embedded_worker_enabled }}
       - name: Configure approved one-box restart
