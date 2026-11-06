@@ -62,7 +62,12 @@ def test_s2_to_s4_failure_is_200_failed_without_draft(real_client, llm, reason):
     assert res.status_code == 200
     body = res.json()
     assert (body["validation"], body["failReason"], body["draft"]) == ("FAILED", reason, None)
-    assert body["latencyMs"] >= 1 and body["costUsd"] >= 0
+    assert body["latencyMs"] >= 1
+    assert body["costUsd"] is None  # timeout/error or a fake model without a price
+    if reason != "VALIDATION_FAILED":
+        assert body["modelName"] is None and body["inputTokens"] is None
+    else:
+        assert body["modelName"] == "fake-model" and body["inputTokens"] >= 0
 
 
 def test_s7_real_mode_without_key_is_501(real_client, monkeypatch):

@@ -137,7 +137,7 @@ def test_generate_insight(client, validation, reason, latency):
     res = generate_insight(_normal_input(), client)
     assert (res.validation, res.fail_reason, res.latency_ms) == (validation, reason, latency)
     assert (res.draft is not None) == (validation == Validation.PASSED)
-    assert res.cost_usd >= 0  # 실패해도 기록 (모르면 0)
+    assert res.cost_usd is None or res.cost_usd >= 0  # 미확인 비용은 0으로 만들지 않음
 
 
 def test_llm_gets_only_insight_input():
@@ -193,3 +193,26 @@ def test_real_mode_without_key_is_explicit_error(real_client, monkeypatch):
     res = real_client.post("/engine/insight", json=INSIGHT_REQUEST)
     assert res.status_code == 501
     assert res.json()["code"] == "LLM_NOT_CONFIGURED"
+
+
+@pytest.mark.parametrize("draft", [OK_DRAFT, "invalid json"])
+def test_observed_model_and_usage_survive_validation(draft):
+    class ObservedClient:
+        model = "requested-model"
+
+        def complete(self, *_):
+            return LLMResult(draft, "provider-snapshot", 123, 45, 17, 0.000046, False)
+
+    response = generate_insight(_normal_input(), ObservedClient()).to_json_dict()
+    assert response["modelName"] == "provider-snapshot"
+    assert (response["inputTokens"], response["outputTokens"]) == (123, 45)
+    assert response["costUsd"] == 0.000046
+    assert response["latencyMs"] == 17
+
+
+@pytest.mark.parametrize("error", [LLMError("unavailable", 9), LLMTimeout("timeout", 13)])
+def test_error_does_not_fabricate_actual_usage_or_zero_cost(error):
+    response = generate_insight(_normal_input(), FakeClient([error])).to_json_dict()
+    assert response["validation"] == "FAILED"
+    assert response["latencyMs"] == error.latency_ms
+    assert all(response[k] is None for k in ("modelName", "inputTokens", "outputTokens", "costUsd"))

@@ -3,6 +3,8 @@
 입고ITGO의 FastAPI 서버입니다. 수불부 정제 · 입고 계산 엔진과 AI 인사이트를 담당합니다.
 Spring Boot 백엔드가 이 서버를 호출하고, 계산 결과 저장은 백엔드가 합니다.
 
+LLM 모델·토큰·nullable 비용 전달과 서버 선반영 순서는 [호출 메타데이터 계약](docs/decisions/0009-insight-usage-metadata.md)을 따릅니다.
+
 기본 HTTP 실행은 mock입니다. `ENGINE_MODE=real`에서는 단일 XLSX 정제와 계산·직접 시나리오에
 실제 엔진을 연결합니다. HTTP 계산·직접 입력 시나리오·SQS 계산은 동일 source의 DA08 표본으로
 DA-07 위험을 계산하고 인사이트 입력을 조립합니다. 2026년5~7월·주간 기준일·최소20건 정책을 고정했습니다.

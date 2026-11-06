@@ -41,8 +41,8 @@ class Record:
     ok: bool              # 호출 오류 · 시간 초과도 실패
     reason: str | None
     latency_ms: int
-    input_tokens: int
-    output_tokens: int
+    input_tokens: int | None
+    output_tokens: int | None
     cost_usd: float | None
     truncated: bool
 
@@ -76,7 +76,7 @@ def run(clients: list[LLMClient], system: str, cases: list[Case], runs: int) -> 
                     r = client.complete(system, case.user)
                 except LLMError as e:
                     records.append(Record(client.model, case.id, case.values, False, e.reason.value, e.latency_ms,
-                                          0, 0, None, False))
+                                          None, None, None, False))
                     continue
                 ok, reason = check(r.text, case)
                 records.append(Record(client.model, case.id, case.values, ok, reason, r.latency_ms,
@@ -100,8 +100,12 @@ def _stats(rs: list[Record]) -> dict:
         "pass_rate": round(sum(r.ok for r in rs) / len(rs), 3) if rs else None,
         "reasons": dict(Counter(r.reason for r in rs if r.reason).most_common()),
         "latency_ms": {"p50": percentile(lat, 0.5), "p95": percentile(lat, 0.95), "max": max(lat, default=None)},
-        "tokens_mean": {"input": round(sum(r.input_tokens for r in rs) / len(rs)) if rs else None,
-                        "output": round(sum(r.output_tokens for r in rs) / len(rs)) if rs else None},
+        "tokens_mean": {
+            "input": (round(sum(r.input_tokens for r in rs) / len(rs))
+                      if rs and all(r.input_tokens is not None for r in rs) else None),
+            "output": (round(sum(r.output_tokens for r in rs) / len(rs))
+                       if rs and all(r.output_tokens is not None for r in rs) else None),
+        },
         "cost_usd": ({"total": round(sum(costs), 6), "per_call": round(sum(costs) / len(rs), 6)}
                      if rs and all(c is not None for c in costs) else None),
         "errors": sum(r.reason == "LLM_ERROR" for r in rs),

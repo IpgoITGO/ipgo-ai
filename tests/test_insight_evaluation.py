@@ -300,3 +300,12 @@ def test_service_valid_no_date_draft_is_not_an_evaluation_insert_error(normal):
     assert result.path == "llm" and result.number_check_ok
     assert result.reason_code is None
     assert "도착 예정일 없는 발주 5개" in result.text
+
+
+def test_missing_observed_tokens_keep_report_totals_unknown():
+    from insight.evaluation.bank import GenResult, offline_report
+    output = GenResult("fixture", "llm", "text", None, None, None, None, None, True, True,
+                       input_tokens=None, output_tokens=None)
+    report = offline_report([output], CFG, 1)
+    assert report["tokens"] == {"input_total": None, "output_total": None}
+    assert report["cost_usd"] is None

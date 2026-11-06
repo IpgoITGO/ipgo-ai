@@ -127,6 +127,7 @@ def test_run_counts_failures_in_latency():
     assert s["reasons"] == {"LLM_TIMEOUT": 1, "LLM_ERROR": 1, "format": 1}
     assert s["latency_ms"]["max"] == 10000      # 시간 초과도 응답시간에 들어감
     assert s["cost_usd"] is None                # 실패 건은 비용을 모름 → 합계 없음
+    assert s["tokens_mean"] == {"input": None, "output": None}
     assert s["pass_rate"] == 0.25               # 4건 중 통과 1건. 호출 오류 · 시간 초과도 실패로 셈
 
 
@@ -144,3 +145,11 @@ def test_main_fake_writes_summary_without_text(tmp_path, capsys):
     assert len(data["by_case"]) == 2 * 5       # 두 모델 × 값 포함 사례 5개
     assert all("text" not in r for r in data["records"])  # 생성 문장 원문은 저장하지 않음
     assert "| gpt-4o |" in capsys.readouterr().out
+
+
+def test_missing_observed_tokens_do_not_crash_or_become_zero():
+    from insight.benchmark import Record
+    record = Record("fixture", "case", False, True, None, 1, None, None, None, False)
+    stats = summarize([record])["by_model"]["fixture"]
+    assert stats["tokens_mean"] == {"input": None, "output": None}
+    assert stats["cost_usd"] is None
