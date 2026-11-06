@@ -1,7 +1,6 @@
 """HTTP와 SQS의 공통 계산 경로. 읽기 권한을 확인한 동일 DataFrame만 표본과 계산에 사용한다."""
 import hashlib
 import json
-import math
 
 import pandas as pd
 
@@ -40,9 +39,13 @@ def calculate(request: CalculateRequest, daily: pd.DataFrame) -> CalculateRespon
                 elif key == "is_valid_observation":
                     values.append(bool(value))
                 else:
-                    number = float(value)
-                    if not math.isfinite(number):
-                        raise core.CalculationInputError("이력 원본 수량이 유한하지 않아요")
+                    # 상품별 입력 오류는 core의 판정을 유지한다. digest는 오류 표식만 기록한다.
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError):
+                        values.append("invalid")
+                        continue
+                    # float.hex는 NaN/±Infinity도 JSON 숫자 대신 nan/inf/-inf 문자열로 남긴다.
                     values.append((0.0 if number == 0 else number).hex())
             digest_builder.update(json.dumps(values, separators=(",", ":"), allow_nan=False).encode() + b"\n")
         digest = digest_builder.hexdigest()

@@ -356,6 +356,8 @@ AI의 CALCULATE `accuracyEvaluation`은 선택적 확장 필드입니다. 원본
 서버의 기존 `selection_snapshot.resultFacts`에 저장하며, K1에는 정수 올림한 `accuracy.history`와
 출처/기간/H/평가 상태를 담은 선택적 `accuracy.evaluation`을 제공합니다. 오차는 원본으로 계산합니다.
 기록 없는 구버전은 빈 이력, 표본 없음은 EMPTY, 평가 미실행은 UNAVAILABLE로 구분합니다.
+digest에는 NaN·무한대를 문자열 표식으로, 결측·숫자 변환 불가 수량을 `invalid`로 기록합니다.
+이 메타데이터 처리로 전체 계산을 실패시키지 않으며, 문제 상품의 계산 불가 사유와 정상 상품의 결과는 유지합니다.
 새 BACKTEST 작업·DB migration·LLM 호출·과거 결과 덮어쓰기는 없습니다.
 
 필드·digest 정규화·호환 규칙: [#93 계약](docs/decisions/accuracy-history-93.md).

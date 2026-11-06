@@ -8,6 +8,7 @@ import pytest
 from app import calculation, repository
 from app.jobs import JobEnvelope, execute
 from app.risk_policy import load_risk_policy
+from app.worker import process_message
 from engine.calculate import calculate as core_calculate
 from engine.risk_sampling import prepare_risk_context
 from schemas.engine import CalculateRequest
@@ -70,6 +71,8 @@ def test_same_calculation_metrics_history_and_reproducible_digest():
     assert result.forecast_error_rate == 0
     assert e == calculation.calculate(request, frame.iloc[::-1]).results[0].accuracy_evaluation
     assert len(e.data_hash) == len(e.policy_hash) == 64
+    # #74의 유한 수량 fixture에서 기록한 digest. 오류 표식 추가가 기존 hash를 바꾸면 안 된다.
+    assert e.data_hash == "76c390a9a04cf80d7b2b593db3cfc7e93496b1827e325f02f802e0d9f313e1ac"
 
 
 def test_future_rows_do_not_enter_history_or_digest():
@@ -126,3 +129,53 @@ def test_empty_dataframe_without_columns_remains_a_not_calculable_result():
     assert result.status.value == "NOT_CALCULABLE"
     assert result.accuracy_evaluation.status == "UNAVAILABLE"
     assert result.accuracy_evaluation.history == []
+
+
+@pytest.mark.parametrize("day,risk_enabled", [
+    pytest.param(date(2026, 6, 15), "true", id="before-policy"),
+    pytest.param(date(2026, 11, 3), "false", id="disabled-policy"),
+])
+@pytest.mark.parametrize("invalid_quantity", [
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="positive-infinity"),
+    pytest.param(float("-inf"), id="negative-infinity"),
+    pytest.param(None, id="missing"),
+    pytest.param("not-a-number", id="invalid-text"),
+])
+def test_digest_keeps_product_failures_isolated_in_http_and_worker(
+    client, monkeypatch, day, risk_enabled, invalid_quantity,
+):
+    monkeypatch.setenv("ENGINE_MODE", "real")
+    monkeypatch.setenv("IPGO_RISK_ENABLED", risk_enabled)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    request, frame = fixture()
+    request.as_of_date = request.today = day
+    request.product_ids = [101, 102]
+    request.settings.append(request.settings[0].model_copy(update={"product_id": 102}))
+    problem = frame.assign(product_id=102).astype({"closing_qty": object})
+    problem.loc[problem.stock_date == day, "closing_qty"] = invalid_quantity
+    daily = pd.concat([frame, problem], ignore_index=True)
+    monkeypatch.setattr(repository, "load_product_daily", lambda *a, **kw: daily)
+    baseline = core_calculate(request, daily).to_json_dict()
+
+    http = client.post("/engine/calculate", json=request.to_json_dict())
+    assert http.status_code == 200
+    worker = process_message(JobEnvelope(
+        contractVersion="1", jobId="synthetic-digest-regression", jobType="CALCULATE",
+        payload=request.to_json_dict(),
+    ).model_dump_json(by_alias=True))
+    assert worker.status.value == "SUCCEEDED"
+    assert worker.error is None and worker.result == http.json()
+    results = http.json()["results"]
+    assert [(r["productId"], r["status"]) for r in results] == [(101, "OK"), (102, "NOT_CALCULABLE")]
+    assert "수불부를 확인해 주세요" in results[1]["reason"]
+    for result, original in zip(results, baseline["results"], strict=True):
+        evaluation = result.pop("accuracyEvaluation")
+        original.pop("accuracyEvaluation")
+        assert result == original
+        assert evaluation["status"] == "UNAVAILABLE" and evaluation["history"] == []
+        assert len(evaluation["dataHash"]) == 64
+
+    # 입력 순서와 무관하게 같은 표식을 기록하고, 비유한 JSON 숫자를 응답에 넣지 않는다.
+    replay = calculation.calculate(request, daily.iloc[::-1]).to_json_dict()
+    assert replay == worker.result

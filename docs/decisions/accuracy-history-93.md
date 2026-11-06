@@ -18,6 +18,7 @@ ProductResult.accuracyEvaluation은 선택적이다. schemaVersion=1, status=AVA
 - 현재 서버는 da07-2026-tune-weekly-v1 정책과 canonical policy hash 8594706942cd7bca0c7e73cabf4c242d02d9d731eaa1d23461038e6118f6ee6d를 수용한다. 새 정책은 서버 계약을 먼저 확장해야 한다.
 - policyHash는 정책 파일 JSON 객체를 키 정렬·공백 없는 JSON으로 정규화한 SHA256이다. 배포 파일 원본의 바이트 hash와는 구분한다.
 - dataHash는 선택 uploadFileIds·asOfDate 이하의 일별 입력을 대상으로 한다. 허용 열을 이름순 정렬하고 행을 product_id/stock_date/upload_file_id순 정렬한다. 열 배열 JSON과 각 행 배열 JSON 뒤에 각각 LF를 붙여 SHA256을 누적한다. ID는 정수 문자열, 날짜는 ISO, 관측 여부는 boolean, 수량은 유한한 float.hex 문자열이며 음의0은0으로 통일한다. JSON은 공백 없는 UTF-8이다. 설정·파일 ID·engineVersion은 기존 snapshot과 결합해 재현한다.
+- #74 회귀 보완: 비유한 수량은 float.hex의 `nan`/`inf`/`-inf` 문자열, 결측·float 변환 불가 수량은 공통 `invalid` 표식으로 정규화한다. 유효한 수량의 기존 digest 바이트는 바꾸지 않는다. 변환 불가 값들의 원문 차이는 구별하지 않으며, hash는 정규화된 입력의 재현 근거다. 상품별 계산 가능 여부·사유는 기존 엔진이 판정하고 digest 처리가 정상 상품까지 전체 실패로 바꾸지 않는다. 평가 미실행은 UNAVAILABLE/빈 history를 유지한다. wire에는 비유한 JSON 숫자나 원본 오류 표식을 보내지 않고 64자리 hash만 전달하므로 schemaVersion과 서버 검증 계약은 유지한다.
 - 서버는 필드·정책·날짜/중복·H/산식/배수·숫자·이력 건수/성공수·원본 WAPE를 검증한 후 기존 거래 안에서 selection_snapshot.resultFacts[productId].accuracyEvaluation에 저장한다. 기존 requiredQtyBeforeRounding과 함께 보존한다.
 - 구버전 필드 누락은 허용하고, 명시된 필드가 손상됐으면 부분 저장 없이 거부한다. 권한/대상 검사는 기존 job/run/source 경계를 따른다. 저장된 dataHash 자체를 원본 DB와 독립 재계산해 인증하는 기능은 아니다.
 
