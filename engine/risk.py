@@ -20,6 +20,8 @@ class RiskContext:
     period_start: date
     period_end: date
     min_samples: int
+    policy_version: str | None = None
+    policy_hash: str | None = None
 
     def __post_init__(self):
         if (type(self.period_start) is not date or type(self.period_end) is not date

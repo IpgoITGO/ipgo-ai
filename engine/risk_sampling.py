@@ -1,4 +1,6 @@
 """DA07: 명시적으로 고정한 정책으로 요청 source의 DA08 표본을 만든다."""
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -74,4 +76,9 @@ def prepare_risk_context(
         batches = generate_error_sample_batches(daily, plans)
     except (BacktestInputError, RiskInputError) as exc:
         raise CalculationInputError("위험 표본의 원본·기간·산식 입력을 확인해 주세요") from exc
-    return RiskContext(tuple(batches), policy.period_start, policy.period_end, policy.min_samples)
+    policy_json = json.dumps(dict(version=policy.version, periodStart=policy.period_start.isoformat(),
+        periodEnd=policy.period_end.isoformat(), availableOn=policy.available_on.isoformat(),
+        origins=[d.isoformat() for d in policy.origins], minSamples=policy.min_samples),
+        sort_keys=True, separators=(",", ":"))
+    return RiskContext(tuple(batches), policy.period_start, policy.period_end, policy.min_samples,
+                       policy.version, hashlib.sha256(policy_json.encode()).hexdigest())
