@@ -1,6 +1,6 @@
 """DA-04 입고 수량 산정 · DA-05 소진 예상일과 입고 필요 판정."""
 import math
-from datetime import date
+from datetime import date, timedelta
 
 
 def split_forecast(forecast_total: float, gap_days: int, horizon_days: int) -> tuple[float, float]:
@@ -63,6 +63,21 @@ def round_to_order_unit(qty: float, order_unit_qty: int) -> int:
     return math.ceil(qty / order_unit_qty) * order_unit_qty
 
 
-def expected_shortage_on(as_of: date, today: date, closing_stock: float, daily_forecast: float) -> date | None:
-    """기준일 종료 재고에서 예측 출고를 이어 빼 재고가 0이 되는 날. 산출 불가면 None."""
-    raise NotImplementedError("DA-05 expected_shortage_on")
+def stockout_since(
+    as_of: date, as_of_closing: float, daily_forecast: float, gap_days: int, receipts: dict[int, float],
+) -> date | None:
+    """오늘(s) 시작 재고가 0이면, 기준일(t)부터 이어 빼서 마지막으로 바닥난 날. 오늘 재고가 남아 있으면 None.
+
+    start_stock과 같은 규칙(t+1 ~ s 하루씩 '그날 도착분 더하기 → 일평균 빼기', 0 미만은 0)으로 따라간다.
+    기준일 기말이 이미 0이면 기준일, 중간에 도착분으로 다시 채워졌다가 또 바닥나면 마지막으로 바닥난 날이다(#72).
+    예: 기준일 10/31 기말 8개, 하루 5개 → 11/1 3개, 11/2 0개 → 11/2.
+    """
+    stock = as_of_closing
+    since = 0 if stock <= 0 else None
+    for k in range(1, gap_days + 1):
+        stock = max(0.0, stock + receipts.get(k, 0) - daily_forecast)
+        if stock > 0:
+            since = None
+        elif since is None:
+            since = k
+    return as_of + timedelta(days=since) if since is not None else None
