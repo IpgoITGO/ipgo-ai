@@ -10,7 +10,7 @@
 | 2 | 스키마 원본 | `schemas/` 하나. AI 인사이트 코드도 여기서 import | 엔진 출력이 곧 인사이트 입력 |
 | 3 | 정제 요청 파일 | `files` 배열의 원본은 정확히 1개. `uploadId`와 `files[0].uploadFileId`는 같고 `previousUploadFileId`는 nullable | 단일 파일 schema와 Spring payload는 PR52·Server PR74에 반영됨. 상세는 [0003](0003-cleaning-connection.md) |
 | 4 | 정제 응답 일별 기록 | 행마다 `uploadFileId` 포함 | DB 행에 `upload_file_id`가 있음 |
-| 5 | 입고 주기 추정 | 정제 응답 `estimatedReviewCycleDays` | S1 제안값은 수불부로만 계산 가능 |
+| 5 | 입고 주기 추정 | 정제 응답 `estimatedReviewCycleDays`. 파일 내 SKU별 입고일 최소3개, 간격 중앙값들의 중앙값을 0.5 올림. 부족하면 null | S1 제안만 제공하며 저장/확정은 사용자 동작. 누적/월 경계 추정은 후속 |
 | 6 | 계산 읽기 기준 | `uploadFileIds` + 확인용 `warehouseId` | 덮어쓴 파일 제외, `run_source_files`로 재현 |
 | 7 | 소수 · 정수 | 엔진은 소수. 정수는 입고 단위로 올린 수량(권장 · 시나리오)과 금액뿐 | 기획서 "계산은 소수점까지, 화면에는 정수", ERD NUMERIC(18,3) |
 | 8 | LOW 등급 예측 범위 | calculate 응답 `forecastRangeLow/High`, LOW일 때만 값 | `calculation_results`에 저장 |

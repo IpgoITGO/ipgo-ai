@@ -117,8 +117,9 @@ class CleanResponse(CamelModel):
     product_daily_stocks: list[ProductDailyStock]
     validation: ValidationReport
     # S1 제안값. 백엔드가 validation_report에 저장 → 셀러 확인 후 창고 기본값.
-    # TODO(합의): 이번 파일만이 아니라 누적 기록으로 추정하는 방법 (docs/decisions/0001)
-    estimated_review_cycle_days: int | None = None
+    # 파일 내 SKU별 입고일 3개 이상: 간격 중앙값의 중앙값(0.5 올림). 부족하면 null.
+    # 누적/월 경계 추정은 별도 후속이며 수요 관측 flag로 첫 입고를 제외하지 않는다.
+    estimated_review_cycle_days: int | None = Field(default=None, gt=0, strict=True)
 
 
 # =====================================================================

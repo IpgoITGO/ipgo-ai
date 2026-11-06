@@ -2,6 +2,8 @@
 import re
 from datetime import date, datetime, timedelta
 from io import BytesIO
+from math import floor
+from statistics import median
 from zipfile import BadZipFile, ZipFile
 
 import openpyxl
@@ -109,11 +111,31 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
                              product_daily_stocks=product_daily.to_dict("records"),
                              validation=dict(checked_sku_count=len(products),
                                              target_sku_count=len(products) - len(excluded),
-                                             excluded_skus=excluded))
+                                             excluded_skus=excluded),
+                             estimated_review_cycle_days=estimate_review_cycle_days(
+                                 product_daily, quarantined | set(bad.sku_barcode)))
     except CleaningInputError:
         raise
     except (ValueError, TypeError, IndexError, KeyError, OverflowError, OSError, EOFError, BadZipFile) as exc:
         raise CleaningInputError("수불부 형식 또는 값이 올바르지 않아요") from exc
+
+
+def estimate_review_cycle_days(product_daily: pd.DataFrame, excluded_barcodes: set[str]) -> int | None:
+    """파일 안 SKU별 입고일 3개 이상일 때 간격 중앙값의 중앙값을 제안한다.
+
+    수요 관측 flag는 입고 검산과 다르므로 사용하지 않는다. 같은 날 여러 LOT는
+    하나의 입고일이며, 제외 SKU와 입고 없는 날은 표본에 넣지 않는다.
+    """
+    dates_by_sku: dict[str, set[date]] = {}
+    for row in product_daily.itertuples():
+        if row.sku_barcode not in excluded_barcodes and row.inbound_qty > 0:
+            dates_by_sku.setdefault(row.sku_barcode, set()).add(row.stock_date)
+    cycles = []
+    for dates in dates_by_sku.values():
+        ordered = sorted(dates)
+        if len(ordered) >= 3:
+            cycles.append(median((b - a).days for a, b in zip(ordered, ordered[1:], strict=False)))
+    return floor(median(cycles) + 0.5) if cycles else None
 
 
 def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: bool = False) -> pd.DataFrame:
