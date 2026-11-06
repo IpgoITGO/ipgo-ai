@@ -12,6 +12,7 @@ from typing import Protocol
 
 import openai
 
+from insight.demo_window import options as demo_options
 from schemas.insight import FailReason
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -20,6 +21,7 @@ DEFAULT_TIMEOUT_SEC = 10.0
 # 10/31 OpenAI 가격표(Standard 요금)와 대조해 일치함: https://developers.openai.com/api/docs/pricing
 PRICES_PER_1M: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o-mini-2024-07-18": (0.15, 0.60),
     "gpt-4o": (2.50, 10.00),
 }
 
@@ -78,8 +80,12 @@ class OpenAIClient:
     def complete(self, system: str, user: str, *, max_tokens: int = 400, temperature: float = 0.2) -> LLMResult:
         t0 = time.perf_counter()
         try:
+            overrides = demo_options(system, user, max_tokens, self.model)
+        except ValueError as exc:
+            raise LLMError(str(exc), _elapsed_ms(t0)) from exc
+        try:
             resp = self._client.chat.completions.create(
-                model=self.model,
+                **{"model": self.model, **overrides},
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 max_tokens=max_tokens,
                 temperature=temperature,

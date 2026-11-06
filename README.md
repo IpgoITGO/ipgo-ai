@@ -361,3 +361,15 @@ digest에는 NaN·무한대를 문자열 표식으로, 결측·숫자 변환 불
 새 BACKTEST 작업·DB migration·LLM 호출·과거 결과 덮어쓰기는 없습니다.
 
 필드·digest 정규화·호환 규칙: [#93 계약](docs/decisions/accuracy-history-93.md).
+
+### 시연용 LLM 자동 만료
+
+개발 배포의 `expected_sha`를 고정하고 `llm_enabled=true`일 때 `llm_expires_at`에 24시간 이내의
+UTC 종료 시각을 지정합니다. SDK 요청 직전 만료를 검사하여 종료 이후 호출은 전송하지 않습니다.
+진행 중 요청은 응답을 마칠 수 있습니다. 시연 기간에는 gpt-4o-mini snapshot·Standard tier·출력400·n1·
+SDK retry0과 입력 JSON UTF-8 바이트+1024 기준16000 상한을 적용합니다. 총 비용 하드캡은 아닙니다.
+
+`source_sha`를 생략하면 workflow의 dev SHA를 배포합니다. 현재 실행 버전에 필요한 변경만 포함한
+commit을 배포하려면 dev에 병합된 정확한 source SHA와 같은 `expected_sha`를 지정합니다.
+checkout 후 실제 HEAD와 승인 SHA 일치 및 dev의 ancestor 여부를 AWS 쓰기 전에 검사합니다.
+workflow head SHA와 실제 source SHA는 배포 기록에서 구분합니다.

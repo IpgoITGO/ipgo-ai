@@ -1,5 +1,6 @@
 import os
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -13,7 +14,9 @@ def workflow():
 
 def gate(**overrides):
     step = workflow()['jobs']['deploy']['steps'][0]
-    env = dict(os.environ, COMPUTE_MODE='onebox', MAINTENANCE_APPROVED='true', ENGINE_MODE='mock',
+    env = dict(os.environ, EXPECTED_SHA='a'*40, GITHUB_SHA='a'*40, DEPLOYMENT_SOURCE_SHA='a'*40,
+               IPGO_LLM_EXPIRES_AT=(datetime.now(UTC)+timedelta(hours=2)).isoformat(),
+               COMPUTE_MODE='onebox', MAINTENANCE_APPROVED='true', ENGINE_MODE='mock',
                REAL_CAPACITY_APPROVED='false', EMBEDDED_WORKER_ENABLED='false', LLM_ENABLED='false',
                LLM_APPROVED='false', API_DESIRED_COUNT='1', WORKER_DESIRED_COUNT='0')
     env.update(overrides)
@@ -66,3 +69,12 @@ def test_llm_secret_is_opt_in_and_preserves_other_settings(tmp_path):
         {'name': 'DATABASE_URL', 'valueFrom': 'database'},
         {'name': 'OPENAI_API_KEY', 'valueFrom': 'secret-arn'},
     ]
+
+
+def test_deadline_and_exact_sha_gate():
+    real = dict(ENGINE_MODE='real', EMBEDDED_WORKER_ENABLED='true', REAL_CAPACITY_APPROVED='true',
+                LLM_ENABLED='true', LLM_APPROVED='true')
+    assert gate(**real, IPGO_LLM_EXPIRES_AT='') != 0
+    assert gate(**real, IPGO_LLM_EXPIRES_AT='2000-01-01T00:00:00Z') != 0
+    assert gate(**real, IPGO_LLM_EXPIRES_AT='2026-11-06T08:30:00') != 0
+    assert gate(**real, EXPECTED_SHA='b'*40) != 0
