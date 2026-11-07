@@ -377,3 +377,32 @@ SDK retry0과 입력 JSON UTF-8 바이트+1024 기준16000 상한을 적용합�
 commit을 배포하려면 dev에 병합된 정확한 source SHA와 같은 `expected_sha`를 지정합니다.
 checkout 후 실제 HEAD와 승인 SHA 일치 및 dev의 ancestor 여부를 AWS 쓰기 전에 검사합니다.
 workflow head SHA와 실제 source SHA는 배포 기록에서 구분합니다.
+
+## Docker 캐시와 배포 시간 요약
+
+CI와 개발 배포는 BuildKit의 GitHub Actions 캐시를 사용합니다. 캐시 scope는
+`ai-${{ runner.arch }}`로 분리하여 x86과 ARM 레이어가 서로 덮어쓰지 않게 합니다.
+PR에서는 캐시를 읽기만 하고, dev push CI와 승인된 수동 배포에서만 저장합니다.
+캐시 읽기/저장 작업에는 각각 60초 제한을 두며, 캐시 저장 오류는 빌드 성공을 뒤집지 않습니다.
+ 캐시가 없으면 기존처럼 새로 빌드합니다.
+`mode=max`로 중간 빌드 레이어도 보존하므로 저장공간 사용량은 늘 수 있습니다.
+같은 SHA의 검증된 ECR 이미지가 있으면 기존 조건대로 빌드를 생략합니다.
+캐시가 이미지의 출처·SHA·digest 검증이나 배포 승인을 대신하지 않습니다.
+
+AI는 기존 requirements 설치 레이어를 재사용하며 runtime import·ARM 용량 검사를 유지합니다.
+
+배포 job 마지막의 **Summarize deployment timing**이 Actions 실행의 **Summary**에
+시도 시작→job 시작의 대기 합계와 각 단계 시간·결과를 기록합니다. 실행 전 대기는
+환경 승인·concurrency·러너 할당을 개별 분리하지 않습니다. 재실행은 현재 시도의
+`run_started_at`부터 계산하며 이전 시도의 시간을 더하지 않습니다. job 실행 시간은
+요약 생성 시점까지이고 후속 post 처리나 전체 실행 종료까지의 시간이 아닙니다.
+ECS 배포 단계는 등록·교체·안정화 대기 합계입니다.
+
+요약은 GitHub의 `actions: read` 권한만 추가로 사용하며 AWS를 호출하지 않습니다.
+배포 실패·단계 생략·API 집계 중/조회 실패를 구분하고, 조회 실패가 배포 결과를 바꾸지
+않습니다. checkout 이전 실패나 요약 script가 없는 과거 source SHA 배포에서는
+요약을 만들 수 없으므로 Actions 기본 job 기록을 확인합니다. 취소 시 러너가 종료되면
+요약 실행 자체가 보장되지 않습니다. token이나 API 예외 원문은 출력하지 않습니다.
+
+로컬 검증: `python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v`.
+실제 GHA 캐시 저장/복원·native ARM CI·시간 단축 효과는 다음 승인된 실행에서 확인해야 합니다.
