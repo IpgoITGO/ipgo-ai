@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Verify immutable image reuse without AWS
-        run: python3 -m unittest discover -s scripts/testing -p 'test_ecr_image.py' -v
+        run: python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
 
   test:
     runs-on: ubuntu-latest
@@ -41,8 +41,15 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       - name: Build runtime image
-        run: docker build --tag ipgo-ai:ci .
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          load: true
+          tags: ipgo-ai:ci
+          cache-from: type=gha,scope=ai-${{ runner.arch }},timeout=60s
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=max,scope=ai-{0},timeout=60s,ignore-error=true', runner.arch) || '' }}
       - name: Import application and construct provider client from runtime image
         run: >-
           docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m
@@ -55,8 +62,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       - name: Build native ARM runtime image
-        run: docker build --tag ipgo-ai:arm-capacity .
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          load: true
+          tags: ipgo-ai:arm-capacity
+          cache-from: type=gha,scope=ai-${{ runner.arch }},timeout=60s
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=max,scope=ai-{0},timeout=60s,ignore-error=true', runner.arch) || '' }}
       - name: Check real synthetic engine within 256 MiB
         shell: bash
         run: |
