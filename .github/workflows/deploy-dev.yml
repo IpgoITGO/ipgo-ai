@@ -86,7 +86,6 @@ jobs:
       IPGO_LLM_EXPIRES_AT: ${{ inputs.llm_expires_at }}
       COMPUTE_MODE: ${{ vars.AWS_DEV_COMPUTE_MODE }}
       ECS_SERVICE_NAME: ${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && 'ipgo-dev-onebox-ai-api' || 'ipgo-dev-ai-api' }}
-      ECS_TASK_FAMILY: ${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && 'ipgo-dev-onebox-ai-api' || 'ipgo-dev-ai-api' }}
       IMAGE_TAG: ${{ inputs.source_sha || github.sha }}${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && '-arm64' || '' }}
     environment: dev
     steps:
@@ -219,18 +218,9 @@ jobs:
           ECR_REPOSITORY: ipgo-dev/ai
           EXPECTED_IMAGE_DIGEST: ${{ steps.image_lookup.outputs.digest }}
         run: python3 "$RUNNER_TEMP/check_ecr_image.py" --require-present
-      - name: Read current task definitions
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition "$ECS_TASK_FAMILY" \
-            --query taskDefinition \
-            > "$RUNNER_TEMP/ai-api-task-definition.json"
-          if [ "$COMPUTE_MODE" != onebox ]; then
-            aws ecs describe-task-definition \
-              --task-definition ipgo-dev-ai-worker \
-              --query taskDefinition \
-              > "$RUNNER_TEMP/ai-worker-task-definition.json"
-          fi
+      - name: Capture active service task definitions
+        timeout-minutes: 2
+        run: python3 "$RUNNER_TEMP/verify_deployment.py" snapshot --service ai
       - name: Configure API OpenAI secret
         env:
           ENGINE_MODE: ${{ inputs.engine_mode }}
@@ -287,6 +277,9 @@ jobs:
             IPGO_LLM_EXPIRES_AT=${{ inputs.llm_expires_at }}
             ENGINE_MODE=${{ inputs.engine_mode }}
             IPGO_EMBEDDED_WORKER_ENABLED=${{ inputs.embedded_worker_enabled }}
+      - name: Verify active template revisions before ECS writes
+        timeout-minutes: 2
+        run: python3 "$RUNNER_TEMP/verify_deployment.py" check-template --service ai
       - name: Configure approved one-box restart
         if: env.COMPUTE_MODE == 'onebox'
         run: |

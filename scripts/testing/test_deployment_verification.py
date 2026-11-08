@@ -90,7 +90,7 @@ class CiVerificationTests(unittest.TestCase):
         if "/runs/20/" in path:
             return {"jobs": self.db_jobs}
         if "/pulls/1/files" in path:
-            return [{"filename": name} for name in self.pr_files]
+            return [name if isinstance(name, dict) else {"filename": name} for name in self.pr_files]
         if "/commits/" in path:
             return self.prs
         raise AssertionError("Unexpected evidence query")
@@ -187,6 +187,51 @@ class CiVerificationTests(unittest.TestCase):
     def test_document_only_change_does_not_require_database_workflow(self):
         self.assertEqual(self.check(["README.md", "docs/guide.md"]), {"test_run": 10})
         self.assertFalse(any("database.yml" in path for path in self.calls))
+
+    def test_renamed_db_input_requires_exact_successful_database_evidence(self):
+        old = "src/main/resources/db/migration/V999__fixture.sql"
+        new = "docs/archived-migration.sql"
+        self.pr_files = [{"filename": new, "previous_filename": old, "status": "renamed"}]
+        self.assertEqual(self.check([new]), {"test_run": 10, "database_run": 20})
+        for conclusion in ("failure", "cancelled", None):
+            self.db_run["conclusion"] = conclusion
+            with self.subTest(conclusion=conclusion), self.assertRaises(M.GateError):
+                self.check([new])
+        original = self.get
+
+        def missing_database(path):
+            if "/workflows/database.yml/" in path:
+                return {"workflow_runs": []}
+            return original(path)
+
+        with self.assertRaises(M.GateError):
+            M.ci_check(self.env, "server", missing_database, [new])
+
+    def test_rename_into_db_deletion_and_mixed_paths_require_database(self):
+        cases = [
+            [{"filename": "database/probe.sql", "previous_filename": "docs/probe.sql", "status": "renamed"}],
+            [{"filename": "database/probe.sql", "status": "removed"}],
+            [{"filename": "README.md"}, {"filename": "docs/probe.sql", "previous_filename": "database/probe.sql"}],
+        ]
+        for files in cases:
+            with self.subTest(files=files):
+                self.pr_files = files
+                self.assertIn("database_run", self.check())
+                self.db_run["conclusion"] = "failure"
+                with self.assertRaises(M.GateError):
+                    self.check()
+                self.db_run["conclusion"] = "success"
+
+    def test_non_database_rename_does_not_add_database_requirement(self):
+        self.pr_files = [{"filename": "docs/new.md", "previous_filename": "docs/old.md", "status": "renamed"}]
+        self.assertEqual(self.check(["docs/new.md"]), {"test_run": 10})
+        self.assertFalse(any("/workflows/database.yml/" in path for path in self.calls))
+
+    def test_malformed_previous_file_path_is_not_silently_ignored(self):
+        for previous in (None, "", 1):
+            self.pr_files = [{"filename": "docs/new.md", "previous_filename": previous}]
+            with self.subTest(previous=previous), self.assertRaises(M.GateError):
+                self.check()
 
     def test_cache_and_deployment_tools_do_not_require_unrelated_database_ci(self):
         # PR143's actual file set previously blocked redeployment of dev314bb98.
