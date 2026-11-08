@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -121,6 +122,30 @@ def database_required(files):
     return any(fnmatch.fnmatchcase(path, pattern) for path in files for pattern in DB_PATHS)
 
 
+def changed_paths(sha, cwd=None):
+    require(re.fullmatch(r"[0-9a-f]{40}", sha), "Invalid approved source SHA")
+    # Keep both sides of a rename, including a DB input moved out of its scope.
+    result = subprocess.run(
+        ["git", "diff", "--no-renames", f"{sha}^1", sha, "--name-only", "-z"],
+        cwd=cwd,
+        capture_output=True,
+        check=True,
+        timeout=15,
+    )
+    return [path for path in result.stdout.decode().split("\0") if path]
+
+
+def pr_paths(files):
+    paths = []
+    for file in files:
+        for key in ("filename", "previous_filename"):
+            if key == "filename" or key in file:
+                path = file[key]
+                require(isinstance(path, str) and path, "Invalid PR file path evidence")
+                paths.append(path)
+    return paths
+
+
 def validate_url(url):
     parsed = urlsplit(url)
     require(
@@ -164,7 +189,7 @@ def ci_check(env, service, get, changed_files):
         files = pages(get, f"/repos/{repo}/pulls/{merged[0]['number']}/files")
         require(files, "Merged PR file evidence is missing")
         # Full PR files cover squash/rebase and multi-commit changes beyond the last parent diff.
-        if database_required([*changed_files, *(f["filename"] for f in files)]):
+        if database_required([*changed_files, *pr_paths(files)]):
             evidence["database_run"] = workflow_success(
                 get, repo, "database.yml", merged[0]["head"]["sha"], "pull_request", {"verify"}
             )
@@ -244,6 +269,76 @@ def service_name(env, service):
     name = prefix + suffix
     require(env.get("ECS_SERVICE_NAME") == name, "Unexpected target service")
     return name
+
+
+def template_targets(env, service):
+    name = service_name(env, service)
+    if service == "server":
+        return {name: "task-definition.json"}
+    targets = {name: "ai-api-task-definition.json"}
+    if env.get("COMPUTE_MODE") != "onebox":
+        targets["ipgo-dev-ai-worker"] = "ai-worker-task-definition.json"
+    return targets
+
+
+def require_template_arn(env, name, arn):
+    require(
+        re.fullmatch(r"[0-9]{12}", env.get("AWS_ACCOUNT_ID", ""))
+        and isinstance(arn, str)
+        and re.fullmatch(
+            rf"arn:aws:ecs:{REGION}:{env['AWS_ACCOUNT_ID']}:task-definition/{name}:[0-9]+", arn
+        ),
+        "Active task definition has the wrong account, region or family",
+    )
+
+
+def active_template_arn(env, name, read):
+    data = read("ecs", "describe-services", cluster=CLUSTER, services=[name])
+    require(not data.get("failures") and len(data["services"]) == 1, "Template service inspection failed")
+    current = data["services"][0]
+    require(current["status"] == "ACTIVE" and current["serviceName"] == name, "Unexpected template service")
+    arn = current["taskDefinition"]
+    require_template_arn(env, name, arn)
+    deployments = current["deployments"]
+    require(
+        len(deployments) == 1
+        and deployments[0]["status"] == "PRIMARY"
+        and deployments[0]["taskDefinition"] == arn
+        and deployments[0].get("rolloutState") == "COMPLETED",
+        "Template service has an incomplete or concurrent deployment",
+    )
+    return arn
+
+
+def capture_templates(env, service, read):
+    templates, snapshot = {}, {}
+    for name, filename in template_targets(env, service).items():
+        arn = active_template_arn(env, name, read)
+        definition = read("ecs", "describe-task-definition", taskDefinition=arn)["taskDefinition"]
+        require(
+            definition["taskDefinitionArn"] == arn and definition["family"] == name,
+            "Active task definition response mismatch",
+        )
+        templates[filename], snapshot[name] = definition, arn
+    return templates, snapshot
+
+
+def check_templates(env, service, read, snapshot):
+    require(
+        isinstance(snapshot, dict) and set(snapshot) == set(template_targets(env, service)),
+        "Template snapshot mismatch",
+    )
+    for name, arn in snapshot.items():
+        require_template_arn(env, name, arn)
+        require(active_template_arn(env, name, read) == arn, "Active task definition changed before deployment")
+    return {"active_templates_unchanged": True}
+
+
+def write_private_json(path, value):
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        json.dump(value, stream)
 
 
 def image_digests(read, service, env):
@@ -419,7 +514,7 @@ def post_check(env, service, read, smoke):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("ci", "preflight", "post"))
+    parser.add_argument("command", choices=("ci", "preflight", "snapshot", "check-template", "post"))
     parser.add_argument("--service", choices=("server", "ai"), required=True)
     args = parser.parse_args()
     try:
@@ -427,24 +522,24 @@ def main():
             token = os.environ["GH_TOKEN"]
             sha = os.environ["EXPECTED_SHA"]
             require(re.fullmatch(r"[0-9a-f]{40}", sha), "Invalid approved source SHA")
-            changed = (
-                subprocess.run(
-                    ["git", "diff", f"{sha}^1", sha, "--name-only", "-z"],
-                    capture_output=True,
-                    check=True,
-                    timeout=15,
-                )
-                .stdout.decode()
-                .split("\0")
-            )
             result = ci_check(
                 os.environ,
                 args.service,
                 lambda path: http_json("https://api.github.com" + path, token),
-                [p for p in changed if p],
+                changed_paths(sha),
             )
         elif args.command == "preflight":
             result = preflight(os.environ, args.service, aws_read)
+        elif args.command == "snapshot":
+            templates, snapshot = capture_templates(os.environ, args.service, aws_read)
+            directory = Path(os.environ["RUNNER_TEMP"])
+            for filename, definition in templates.items():
+                write_private_json(directory / filename, definition)
+            write_private_json(directory / "source-task-definitions.json", snapshot)
+            result = {"active_templates_captured": len(templates)}
+        elif args.command == "check-template":
+            snapshot = json.loads((Path(os.environ["RUNNER_TEMP"]) / "source-task-definitions.json").read_text())
+            result = check_templates(os.environ, args.service, aws_read, snapshot)
         else:
             result = post_check(os.environ, args.service, aws_read, http_json)
         print(json.dumps(result))

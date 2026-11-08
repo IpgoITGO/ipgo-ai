@@ -424,6 +424,15 @@ AWS 인증 후 ECR push/ECS 변경 전에 계정·서울 리전 대상 서비스
 별도 승인 작업입니다. 실행 task가 없는 경우 DescribeTasks 권한은 이 사전 단계에서
 확인할 수 없으며 이후 검증에서 실패할 수 있습니다.
 
+배포 템플릿은 family의 최신 revision 대신 대상 서비스의 `DescribeServices.taskDefinition`
+정확 ARN으로 읽습니다. 활성 서비스와 완료된 단일 PRIMARY deployment를 확인하고,
+AI legacy API/worker는 각자의 ARN을 따로 고정합니다. one-box는 별도 worker 템플릿을
+읽지 않습니다. 템플릿/ARN snapshot은 runner 임시 파일에 0600 권한으로 저장하며,
+ECS 변경 직전에 서비스 ARN과 rollout 상태를 재확인합니다. 누락·진행 중 배포·다른
+계정/리전/family·revision 변경은 중단하며 family 최신 revision으로 대체하지 않습니다.
+재확인 이후 AWS 쓰기까지의 경합을 원자적으로 막는 기능은 아니므로 기존 배포 직렬화와
+승인 경계를 유지합니다.
+
 배포 후 deploy action이 반환한 후보 task definition ARN과 실제 서비스/모든 task의
 revision·승인 이미지·digest·replica 수·rollout 완료를 대조합니다. OCI index와 실행 플랫폼
 manifest digest를 구분하고 다른 플랫폼/attestation digest를 성공으로 처리하지 않습니다.
