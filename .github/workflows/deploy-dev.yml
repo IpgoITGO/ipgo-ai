@@ -80,6 +80,7 @@ jobs:
     if: github.ref == 'refs/heads/dev' && vars.AWS_DEPLOY_ROLE_ARN != '' && vars.AWS_ACCOUNT_ID != ''
     runs-on: ${{ vars.AWS_DEV_COMPUTE_MODE == 'onebox' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     env:
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
       DEPLOYMENT_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       CONTINUOUS_LLM_APPROVED: ${{ inputs.continuous_llm_approved }}

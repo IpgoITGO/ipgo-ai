@@ -129,6 +129,30 @@ class ActiveTemplateTests(unittest.TestCase):
         self.assertEqual(set(templates), {"ai-api-task-definition.json"})
         self.assertEqual(set(snapshot), {"ipgo-dev-onebox-ai-api"})
 
+    def test_workflow_job_account_reaches_ai_snapshot_and_template_guard(self):
+        workflow = (ROOT / ".github/workflows/deploy-dev.yml").read_text()
+        # These steps inherit the job env, unlike preflight's step-local account.
+        job_env = workflow.split("    env:\n", 1)[1].split("    environment:", 1)[0]
+        binding = next(
+            (
+                line.split(":", 1)[1].strip()
+                for line in job_env.splitlines()
+                if line.startswith("      AWS_ACCOUNT_ID:")
+            ),
+            "",
+        )
+        env = {
+            **self.env,
+            "ECS_SERVICE_NAME": "ipgo-dev-onebox-ai-api",
+            "AWS_ACCOUNT_ID": binding.replace("${{ vars.AWS_ACCOUNT_ID }}", ACCOUNT),
+        }
+        templates, snapshot = M.capture_templates(env, "ai", self.read)
+        self.assertEqual(set(templates), {"ai-api-task-definition.json"})
+        self.assertEqual(
+            snapshot, {env["ECS_SERVICE_NAME"]: self.services[env["ECS_SERVICE_NAME"]]["taskDefinition"]}
+        )
+        self.assertEqual(M.check_templates(env, "ai", self.read, snapshot), {"active_templates_unchanged": True})
+
     def test_legacy_server_selects_legacy_service(self):
         self.env.update(COMPUTE_MODE="legacy", ECS_SERVICE_NAME="ipgo-dev-server")
         _, snapshot = M.capture_templates(self.env, "server", self.read)
