@@ -406,3 +406,39 @@ ECS 배포 단계는 등록·교체·안정화 대기 합계입니다.
 
 로컬 검증: `python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v`.
 실제 GHA 캐시 저장/복원·native ARM CI·시간 단축 효과는 다음 승인된 실행에서 확인해야 합니다.
+
+## 개발 배포 전후 검증
+
+배포는 기존 수동 승인/정확 SHA 조건을 유지합니다. AWS 인증 전 승인 source SHA의
+`test.yml` **dev push** 실행에서 필수 job이 모두 성공했는지 확인합니다. 최신 실행이
+실패·취소·진행 중이거나 필수 job이 생략/누락되면 과거 성공으로 대체하지 않고 중단합니다.
+검증 도구와 ECR 조회 도구는 dispatch된 workflow SHA에서 임시 디렉터리로 추출하며,
+앱 코드는 승인 source SHA 그대로 유지합니다. ECR 이미지 tag도 승인 source SHA로 계산합니다.
+동일 SHA의 ECR 재사용·digest 검사와 캐시/시간 요약은 유지합니다.
+
+AI는 deploy-contract/test/arm-capacity/container 성공을 요구하며 계산/인사이트 계약은 변경하지 않습니다.
+
+AWS 인증 후 ECR push/ECS 변경 전에 계정·서울 리전 대상 서비스·실행 task 조회를 확인합니다.
+배포 역할에는 기존 권한 외에 개발 cluster로 제한한 `ecs:ListTasks`·`ecs:DescribeTasks`가
+필요합니다. Infra bootstrap의 두 배포 역할에 읽기 권한 추가안을 준비했으나 실제 적용은
+별도 승인 작업입니다. 실행 task가 없는 경우 DescribeTasks 권한은 이 사전 단계에서
+확인할 수 없으며 이후 검증에서 실패할 수 있습니다.
+
+배포 후 deploy action이 반환한 후보 task definition ARN과 실제 서비스/모든 task의
+revision·승인 이미지·digest·replica 수·rollout 완료를 대조합니다. OCI index와 실행 플랫폼
+manifest digest를 구분하고 다른 플랫폼/attestation digest를 성공으로 처리하지 않습니다.
+API 컨테이너의 기존 HTTP healthCheck와 실제 HEALTHY를 확인합니다. 이전 revision으로
+되돌아간 안정 상태도 성공으로 처리하지 않으며, 새 자동 재배포/롤백을 실행하지 않습니다.
+
+별도 공개 URL이 없는 AI는 기존 컨테이너 `/health` HTTP probe의 HEALTHY를
+검증합니다. 선택적으로 `AWS_DEV_SMOKE_URL`을 설정하면 HTTPS200/JSON status=ok도
+확인합니다. 공개 경로·Ingress를 새로 만들거나 내부 URL을 공개하지 않습니다.
+
+0개로 내리는 요청은 정지 상태를 확인하고 실제 앱/HTTP 성공으로 표시하지 않습니다.
+AI의 legacy worker는 API와 별도 revision/digest를 검사하며, worker에 healthCheck가
+없으면 앱 HEALTHY를 검증했다고 표시하지 않습니다. one-box 별도 worker는 0개를 유지해야 합니다.
+외부 HTTP의 200/JSON은 경로 응답 검증이며 그 응답 자체가 image digest를 증명하지는 않습니다.
+TLS 검증·redirect 금지를 유지하고 API/CLI 오류 원문이나 token을 로그에 출력하지 않습니다.
+
+검증: `python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v`.
+모의 CI/AWS/HTTP 응답으로 실패·rollback·누락·scale-down을 검사하며 실제 배포 검증과 구분합니다.

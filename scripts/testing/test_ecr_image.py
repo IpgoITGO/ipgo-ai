@@ -216,7 +216,7 @@ class EcrImageTests(unittest.TestCase):
         self.assertLess(lookup, verify)
         self.assertLess(verify, render)
         self.assertIn("EXPECTED_IMAGE_DIGEST: ${{ steps.image_lookup.outputs.digest }}", workflow)
-        self.assertIn("python3 scripts/deployment/check_ecr_image.py --require-present", workflow)
+        self.assertIn('python3 "$RUNNER_TEMP/check_ecr_image.py" --require-present', workflow)
         self.assertIn("tags: ${{ steps.image_lookup.outputs.image }}", workflow)
         self.assertIn("${{ steps.verified_image.outputs.image }}", workflow)
         self.assertNotIn("ecr batch-delete-image", workflow)
