@@ -418,6 +418,10 @@ ECS 배포 단계는 등록·교체·안정화 대기 합계입니다.
 
 AI는 deploy-contract/test/arm-capacity/container 성공을 요구하며 계산/인사이트 계약은 변경하지 않습니다.
 
+`AWS_ACCOUNT_ID`는 deploy job의 공통 환경으로 전달합니다. 개별 step에서 값을 지정하지
+않는 활성 task definition snapshot과 ECS 변경 직전 검사도 같은 계정을 사용합니다.
+preflight에만 값을 전달하면 정상 ARN도 snapshot 단계에서 계정 누락으로 거부됩니다.
+
 AWS 인증 후 ECR push/ECS 변경 전에 계정·서울 리전 대상 서비스·실행 task 조회를 확인합니다.
 배포 역할에는 기존 권한 외에 개발 cluster로 제한한 `ecs:ListTasks`·`ecs:DescribeTasks`가
 필요합니다. Infra bootstrap의 두 배포 역할에 읽기 권한 추가안을 준비했으나 실제 적용은
