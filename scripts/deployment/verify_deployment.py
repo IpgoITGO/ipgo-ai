@@ -7,12 +7,15 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 REGION = "ap-northeast-2"
 CLUSTER = "ipgo-dev-cluster"
+ROLLOUT_WAIT_SECONDS = 60
+ROLLOUT_POLL_SECONDS = 5
 EVIDENCE_ERRORS = (OSError, ValueError, KeyError, TypeError, IndexError, RuntimeError, subprocess.SubprocessError)
 DB_PATHS = (
     "database/**",
@@ -383,6 +386,52 @@ def image_digests(read, service, env):
     return {digest, platform[0]}
 
 
+def wait_rollout(env, service, read):
+    name = service_name(env, service)
+    expected = env.get("EXPECTED_TASK_DEFINITION", "")
+    require_template_arn(env, name, expected)
+    count = desired(env, "DESIRED_COUNT" if service == "server" else "API_DESIRED_COUNT")
+    deadline = time.monotonic() + ROLLOUT_WAIT_SECONDS
+    observations = 0
+    while time.monotonic() < deadline:
+        # Only readiness is polled; AWS errors and identity changes stay fatal.
+        data = read("ecs", "describe-services", cluster=CLUSTER, services=[name])
+        observations += 1
+        require(time.monotonic() <= deadline, "Candidate rollout wait timed out")
+        require(not data.get("failures") and len(data["services"]) == 1, "Service evidence incomplete")
+        current = data["services"][0]
+        require(
+            current["status"] == "ACTIVE"
+            and current["serviceName"] == name
+            and current["taskDefinition"] == expected,
+            "Candidate task definition is not active; possible rollback",
+        )
+        require(current["desiredCount"] == count, "Approved desired count changed")
+        deployments = current["deployments"]
+        primary = [d for d in deployments if d["status"] == "PRIMARY"]
+        require(
+            len(primary) == 1 and primary[0]["taskDefinition"] == expected,
+            "Candidate primary deployment is missing or ambiguous",
+        )
+        for deployment in deployments:
+            require_template_arn(env, name, deployment["taskDefinition"])
+            require(deployment.get("rolloutState") != "FAILED", "Candidate rollout failed")
+        state = primary[0].get("rolloutState")
+        require(state in {"IN_PROGRESS", "COMPLETED"}, "Candidate rollout state is missing or unsupported")
+        if (
+            len(deployments) == 1
+            and state == "COMPLETED"
+            and current["runningCount"] == count
+            and current["pendingCount"] == 0
+        ):
+            return {"candidate_rollout_completed": True, "observations": observations}
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, "Candidate rollout wait timed out")
+        time.sleep(min(ROLLOUT_POLL_SECONDS, remaining))
+    raise GateError("Candidate rollout wait timed out")
+
+
+
 def verify_service(read, env, name, td_arn, count, container, digests, api=True):
     require(
         re.fullmatch(
@@ -514,7 +563,7 @@ def post_check(env, service, read, smoke):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("ci", "preflight", "snapshot", "check-template", "post"))
+    parser.add_argument("command", choices=("ci", "preflight", "snapshot", "check-template", "wait-rollout", "post"))
     parser.add_argument("--service", choices=("server", "ai"), required=True)
     args = parser.parse_args()
     try:
@@ -540,6 +589,8 @@ def main():
         elif args.command == "check-template":
             snapshot = json.loads((Path(os.environ["RUNNER_TEMP"]) / "source-task-definitions.json").read_text())
             result = check_templates(os.environ, args.service, aws_read, snapshot)
+        elif args.command == "wait-rollout":
+            result = wait_rollout(os.environ, args.service, aws_read)
         else:
             result = post_check(os.environ, args.service, aws_read, http_json)
         print(json.dumps(result))
