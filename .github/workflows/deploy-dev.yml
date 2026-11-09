@@ -297,6 +297,7 @@ jobs:
           service: ${{ env.ECS_SERVICE_NAME }}
           cluster: ipgo-dev-cluster
           wait-for-service-stability: true
+          wait-max-delay-seconds: 15
       - name: Render worker task definition
         if: env.COMPUTE_MODE != 'onebox'
         id: render-worker
