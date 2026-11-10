@@ -14,7 +14,7 @@ from botocore.config import Config
 from pydantic import ValidationError
 
 from app.config import get_settings
-from app.jobs import JobEnvelope, JobError, JobStatus, JobType, ResultEnvelope, execute
+from app.jobs import JobEnvelope, JobError, JobErrorDetails, JobStatus, JobType, ResultEnvelope, execute
 from app.result_transport import MAX_RESULT_BYTES as MAX_RESULT_BYTES
 from app.result_transport import encode_result
 from engine.calculate import CalculationInputError
@@ -24,12 +24,13 @@ from schemas.engine import BacktestRequest, CalculateRequest, CleanRequest
 logger = logging.getLogger(__name__)
 
 
-def _failure(job: JobEnvelope, code: str, message: str) -> ResultEnvelope:
+def _failure(job: JobEnvelope, code: str, message: str, reason: str | None = None) -> ResultEnvelope:
+    details = JobErrorDetails(reason=reason) if reason else None
     return ResultEnvelope(
         job_id=job.job_id,
         job_type=job.job_type,
         status=JobStatus.FAILED,
-        error=JobError(code=code, message=message),
+        error=JobError(code=code, message=message, details=details),
     )
 
 
@@ -43,8 +44,9 @@ def process_message(body: str) -> ResultEnvelope:
         return _failure(job, code, "입력값을 확인해 주세요.")
     try:
         return execute(job)
-    except CleaningInputError:
-        return _failure(job, "INVALID_SOURCE", "원본을 확인해 주세요.")
+    except CleaningInputError as exc:
+        # 정제 오류 문장은 셀러가 고칠 내용을 담고 있어 그대로 보낸다(#94). HTTP 경로와 같은 문장이다.
+        return _failure(job, "INVALID_SOURCE", str(exc) or "원본을 확인해 주세요.", exc.reason)
     except CalculationInputError:
         return _failure(job, "INVALID_INPUT", "입력값을 확인해 주세요.")
     except NotImplementedError:

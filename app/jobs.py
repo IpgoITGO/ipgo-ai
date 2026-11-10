@@ -29,9 +29,15 @@ class JobEnvelope(CamelModel):
     payload: dict
 
 
+class JobErrorDetails(CamelModel):
+    reason: str
+
+
 class JobError(CamelModel):
     code: str
     message: str
+    # 서버가 업로드 결과의 error.details.reason으로 그대로 내려 준다(#94, server#164). 없으면 null.
+    details: JobErrorDetails | None = None
 
 
 class ResultEnvelope(CamelModel):

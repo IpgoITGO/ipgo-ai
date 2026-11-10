@@ -106,7 +106,7 @@ DB 미설정은 계산 성공으로 대체하지 않습니다. DB 연결 제한�
 
 - XLSX 원본은 10 MiB, 압축 해제 합계는 16 MiB 이하입니다. 1 MB를 넘는 항목의 압축비가
   1000배를 넘으면 거부합니다. 원본 행은 최대 100,000개, 정제 격자는 재고관리단위×일
-  20,000개 및 상품×일 10,000개입니다. XLSX는 단일 파일이며 잘못된 원본은 `INVALID_SOURCE`입니다.
+  20,000개 및 상품×일 10,000개입니다. XLSX는 단일 파일이며 잘못된 원본은 `INVALID_SOURCE`입니다. worker 결과의 `error.message`에는 정제가 찾은 이유 문장을 그대로 담고, 전월 잔여 재고 단위가 이번 파일에 없으면 `error.details.reason = "PREVIOUS_MONTH_MISMATCH"`를 함께 보냅니다(#94). 서버는 이를 업로드 결과 `error.reason`·`error.details.reason`으로 내려 줍니다(server#164).
 - 상품별 `leadTimeDays + reviewCycleDays`는 최대 366일, `today - asOfDate`는 최대 730일,
   계산 요청의 세 시나리오 예상 결과는 총 10,000일 이내이며 DB 원본 조회는 150,000행 이내입니다. 초과하면 `INVALID_INPUT`입니다.
 - DA07 표본 예측 후보는 요청당 최대16,000개입니다. 조정 구간 SKU수×성숙한 기준일수×A/B2개를
