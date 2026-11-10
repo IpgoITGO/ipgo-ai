@@ -29,7 +29,14 @@ DAY_LABEL = re.compile(r"^\s*(\d{1,2})\s*일\s*$")
 
 
 class CleaningInputError(CalculationInputError):
-    """원본 또는 정제 입력이 유효하지 않다."""
+    """원본 또는 정제 입력이 유효하지 않다.
+
+    메시지는 셀러에게 그대로 보이는 문장이다(worker가 결과에 담는다, #94). reason은 화면이 구분할 수 있는 코드다.
+    """
+
+    def __init__(self, message: str, reason: str | None = None):
+        super().__init__(message)
+        self.reason = reason
 
 
 MAX_QTY = 999_999_999_999_999
@@ -78,8 +85,13 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
             raise CleaningInputError("기초 재고는 음수일 수 없어요")
         if previous_units:
             present = set(zip(units.source_inventory_key, units.received_on, strict=True))
-            if any(qty and key not in present for key, qty in previous_units.items()):
-                raise CleaningInputError("전월 잔여 재고의 재고관리단위가 이번 자료에 없어요")
+            missing = sum(1 for key, qty in previous_units.items() if qty and key not in present)
+            if missing:
+                raise CleaningInputError(
+                    f"전월 잔여 재고의 재고관리단위가 이번 자료에 없어요({missing}개). "
+                    "전월 자료와 같은 셀러·창고의 수불부인지 확인해 주세요",
+                    reason="PREVIOUS_MONTH_MISMATCH",
+                )
         bad = _bad_from_grid(grid)
         product_daily = mark_valid_observations(_product_from_grid(grid))
         unsafe = product_daily.sku_barcode.isin(quarantined | set(bad.sku_barcode))

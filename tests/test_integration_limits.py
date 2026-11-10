@@ -1,7 +1,7 @@
 """연결 경계와 용량 제한은 합성 입력과 가짜 DB/SQS만 사용한다."""
 import json
 import threading
-from datetime import timedelta
+from datetime import date, timedelta
 from io import BytesIO
 from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -167,3 +167,31 @@ def test_fake_xlsx_flows_into_actual_calculation(monkeypatch):
     assert seen == [([21], 1)]
     assert result.result["results"][0]["productId"] == 101
     assert result.result["results"][0]["validObservationDays"] == 7
+
+
+def test_previous_month_mismatch_says_how_many_units_and_carries_a_reason_code():
+    # #94: 전월에 재고가 남은 재고관리단위가 이번 파일에 없으면 개수와 구분 코드를 같이 알려 준다.
+    previous = {("GONE", date(2026, 4, 20)): 5, ("ZERO", date(2026, 4, 20)): 0}
+    with pytest.raises(cleaning.CleaningInputError) as raised:
+        cleaning.clean([(source(), build_ledger([1], [unit()]))], set(), previous_units=previous)
+    assert "전월 잔여 재고의 재고관리단위가 이번 자료에 없어요(1개)" in str(raised.value)
+    assert raised.value.reason == "PREVIOUS_MONTH_MISMATCH"
+
+
+def test_worker_sends_the_cleaning_sentence_and_reason_to_the_server(monkeypatch):
+    # #94: worker가 정제 오류 문장을 "원본을 확인해 주세요."로 바꾸지 않고 그대로 보낸다.
+    def fail(_job):
+        raise cleaning.CleaningInputError("같은 바코드에 서로 다른 원가가 있어요")
+    monkeypatch.setattr("app.worker.execute", fail)
+    body = json.dumps({"contractVersion": "1", "jobId": "clean-94", "jobType": "CLEAN", "payload": CLEAN_REQUEST})
+    result = process_message(body)
+    assert result.error.code == "INVALID_SOURCE"
+    assert result.error.message == "같은 바코드에 서로 다른 원가가 있어요"
+    assert result.error.details is None
+
+    def mismatch(_job):
+        raise cleaning.CleaningInputError("전월 잔여 재고…(2개)", reason="PREVIOUS_MONTH_MISMATCH")
+    monkeypatch.setattr("app.worker.execute", mismatch)
+    wire = json.loads(process_message(body).model_dump_json(by_alias=True))
+    assert wire["error"] == {"code": "INVALID_SOURCE", "message": "전월 잔여 재고…(2개)",
+                             "details": {"reason": "PREVIOUS_MONTH_MISMATCH"}}
