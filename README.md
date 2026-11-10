@@ -443,6 +443,14 @@ ECS 변경 직전에 서비스 ARN과 rollout 상태를 재확인합니다. 누�
 재확인 이후 AWS 쓰기까지의 경합을 원자적으로 막는 기능은 아니므로 기존 배포 직렬화와
 승인 경계를 유지합니다.
 
+승인 수량을 설정한 뒤 API 후보 task definition ARN과 단일 PRIMARY deployment의
+`COMPLETED`, 승인 수량·pending 0을 최대 60초 관측 예산/5초 간격으로 읽어 기다립니다.
+기존 deployment 정리·정상 IN_PROGRESS만 기다리며 AWS 오류·증거 누락·FAILED·이전 TD 복귀는 즉시 거부합니다.
+단일 AWS 읽기 시간까지 포함한 엄밀한 60초 완료 보장은 아니며 기한 뒤 응답도 성공으로 받지 않습니다.
+단계 전체는 2분으로 제한하고 완료 뒤에도 엄격한 후검증을 새로 실행합니다.
+이 대기는 API 대상이며 legacy worker 검증과 기존 action의 15초 조회·최대 대기 예산은 유지합니다.
+대기 실패 시 후검증으로 넘어가거나 자동 재배포/복구하지 않습니다. 실제 실패 복구는 승인된 운영 절차를 따릅니다.
+
 배포 후 deploy action이 반환한 후보 task definition ARN과 실제 서비스/모든 task의
 revision·승인 이미지·digest·replica 수·rollout 완료를 대조합니다. OCI index와 실행 플랫폼
 manifest digest를 구분하고 다른 플랫폼/attestation digest를 성공으로 처리하지 않습니다.

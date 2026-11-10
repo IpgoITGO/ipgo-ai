@@ -335,6 +335,12 @@ jobs:
           aws ecs wait services-stable \
             --cluster ipgo-dev-cluster \
             --services "$ECS_SERVICE_NAME" ipgo-dev-ai-worker
+      - name: Wait for exact API candidate rollout
+        timeout-minutes: 2
+        env:
+          EXPECTED_TASK_DEFINITION: ${{ steps.deploy-app.outputs.task-definition-arn }}
+          API_DESIRED_COUNT: ${{ inputs.api_desired_count }}
+        run: python3 "$RUNNER_TEMP/verify_deployment.py" wait-rollout --service ai
       - name: Verify deployed task identity and application health
         timeout-minutes: 2
         env:
