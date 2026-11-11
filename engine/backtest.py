@@ -12,7 +12,7 @@ from numbers import Integral
 
 import pandas as pd
 
-from engine.forecast import forecast_a, forecast_b
+from engine.forecast import _PreparedForecast, forecast_a, forecast_b
 from schemas.base import Method
 from schemas.engine import BacktestRequest, BacktestResponse, Period
 
@@ -194,6 +194,8 @@ def _generate_error_samples(
                         history = _quantities(history)
                         if history is None:
                             reason = SkipReason.INVALID_HISTORY
+                        elif _history_cache is not None:
+                            history = _PreparedForecast(history)
                     if _history_cache is not None:
                         _history_cache[key] = (history, reason)
             if reason is not None:
@@ -203,7 +205,10 @@ def _generate_error_samples(
             target = sku[(sku["stock_date"] > origin) & (sku["stock_date"] <= end)]
             actual, actual_reason = _actual(target, horizon_days)
             for method in selected_methods:
-                forecast = (forecast_a if method == Method.A else forecast_b)(history, origin, horizon_days)
+                if isinstance(history, _PreparedForecast):
+                    forecast = (history.forecast_a if method == Method.A else history.forecast_b)(origin, horizon_days)
+                else:
+                    forecast = (forecast_a if method == Method.A else forecast_b)(history, origin, horizon_days)
                 predicted = forecast.qty
                 if predicted is None:
                     skipped.append(SkippedSample(**context, method=method, reason=SkipReason.FORECAST_UNAVAILABLE,
@@ -236,7 +241,7 @@ def generate_error_samples(
 
 
 def generate_error_sample_batches(product_daily: pd.DataFrame, plans: Sequence[dict]) -> tuple[ErrorSampleBatch, ...]:
-    """여러 H/D 평가에서 동일 SKU·기준일의 이력 검증만 재사용한다. 결과·산식·표본 개수는 동일하다.
+    """여러 H/D 평가에서 동일 SKU·기준일의 이력 검증·기간 집계를 재사용한다.
 
     캐시는 이 함수 안의 SKU 하나에만 존재하며 요청·상품 간 공유하거나 미래 이력을 전달하지 않는다.
     한 SKU를 끝내면 폐기하므로 전체 원장의 모든 prefix를 동시에 보관하지 않는다.
