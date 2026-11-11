@@ -97,8 +97,10 @@ def stockout_risk(
     count = len(error_ratios)
     if count < min_samples:
         return StockoutRisk(None, None, count)
+    # 0출고는 모든 비율에서 같은 재생이다. 위의 전체 입력 검사는 유지하고 overflow도 실제 재생으로 검사한다.
+    replay_ratios = error_ratios[:1] if daily_forecast == 0 else error_ratios
     pre, post = 0, 0
-    for ratio in error_ratios:
+    for ratio in replay_ratios:
         demand = daily_forecast * ratio
         if not isfinite(demand):
             raise RiskInputError("비율을 적용한 예측이 유한한 범위를 넘었어요")
@@ -109,4 +111,4 @@ def stockout_risk(
             raise RiskInputError("재적용한 재고·미충족 수요가 유한한 범위를 넘었어요")
         pre += replay.pre_arrival_unmet > 0
         post += replay.post_arrival_unmet > 0
-    return StockoutRisk(pre / count, post / count, count)
+    return StockoutRisk(pre / len(replay_ratios), post / len(replay_ratios), count)
