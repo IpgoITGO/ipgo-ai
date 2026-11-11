@@ -241,9 +241,18 @@ def calculate(
         from engine.evaluation import index_daily
         indexed = index_daily(daily[(daily.stock_date >= risk_context.period_start)
                                     & (daily.stock_date <= min(request.as_of_date, risk_context.period_end))])
+    # 원본/pooled 표본 범위는 유지한다. 정수 상품 ID만 위치로 묶고 다른 자료형은 기존 비교를 쓴다.
+    dtype = daily["product_id"].dtype
+    positions = (daily.groupby("product_id", sort=False).indices
+                 if not isinstance(dtype, pd.api.extensions.ExtensionDtype) and dtype.kind in "iu" else None)
+    empty = daily.iloc[:0]
     for product_id in ids:
+        sku_daily = daily
+        if positions is not None:
+            rows = positions.get(product_id)
+            sku_daily = daily.iloc[rows] if rows is not None else empty
         config = settings.get(product_id)
-        result, planned = _product(request, daily, product_id, config)
+        result, planned = _product(request, sku_daily, product_id, config)
         result.no_date_receipt_qty = sum(r.quantity for r in request.no_date_receipts if r.product_id == product_id)
         if result.status is ResultStatus.OK:
             for kind, percent in [(ScenarioType.P80, 80), (ScenarioType.P100, 100), (ScenarioType.P120, 120)]:
@@ -253,7 +262,7 @@ def calculate(
                     duplicate=kind is not ScenarioType.P100 and qty == result.recommended_qty,
                 ))
         _apply_accuracy(result, request, config, risk_context, indexed, selector)
-        _apply_risk(result, request, daily, config, planned, risk_context, selector)
+        _apply_risk(result, request, sku_daily, config, planned, risk_context, selector)
         result.insight_input = to_insight_input(result, "이 상품", as_of_date=request.as_of_date)
         results.append(result)
     return CalculateResponse(engine_version=ENGINE_VERSION, results=results)

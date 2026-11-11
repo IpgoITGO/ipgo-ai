@@ -148,6 +148,13 @@ class _QuantityIndex:
         self._invalid = [0, *(valid & ~good).cumsum().tolist()]
         self._unobserved = [0, *(~valid).cumsum().tolist()]
         self._duplicates = [0, *sku["stock_date"].duplicated().cumsum().tolist()]
+        self._forecast = None
+
+    def forecast(self) -> _PreparedForecast:
+        """수량 검사를 통과한 기준일 조회에만 쓰는 상품별 기간 집계를 지연 준비한다."""
+        if self._forecast is None:
+            self._forecast = _PreparedForecast(self._sku)
+        return self._forecast
 
     @staticmethod
     def supports(sku: pd.DataFrame) -> bool:
@@ -252,7 +259,8 @@ def _generate_error_samples(
                             if history is None:
                                 reason = SkipReason.INVALID_HISTORY
                     if reason is None and _history_cache is not None:
-                        history = _PreparedForecast(history)
+                        history = (quantity_index.forecast() if quantity_index is not None
+                                   else _PreparedForecast(history))
                     if _history_cache is not None:
                         _history_cache[key] = (history, reason)
             if reason is not None:
