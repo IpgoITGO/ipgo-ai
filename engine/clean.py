@@ -22,6 +22,9 @@ ID_HEADERS = {
     "sku_mixed_id": "source_inventory_key",
     "SKU명": "sku_name",
 }
+# 없어도 되는 열. 유통기한은 재고관리단위마다 하나이고, 비었거나 날짜로 못 읽으면 None이다(#97).
+OPTIONAL_HEADERS = {"유통기한": "expiry_date"}
+EXPIRY_DATE = re.compile(r"^\s*(\d{4})(?:[-./](\d{1,2})[-./](\d{1,2})|(\d{2})(\d{2}))(?!\d)")
 DATA_START_ROW = 5  # 1행 열 이름 · 2행 'DD 일' · 3행 입고 · 출고 · 조정 · 재고 · 4행 빈 줄
 YEAR_MONTH = re.compile(r"(?<!\d)(20\d{2})[-_. ]?(0[1-9]|1[0-2])(?!\d)")
 KOREAN_MONTH = re.compile(r"(?<!\d)(20\d{2})\s*년\s*(0?[1-9]|1[0-2])\s*월")
@@ -67,7 +70,7 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
             raise CleaningInputError("수불부 날짜가 업로드 기간을 벗어났어요")
         if previous_units and units.stock_date.min().day != 1:
             raise CleaningInputError("전월 재고와 연결할 때 이번 자료는 1일부터 연속되어야 해요")
-        metadata = units[[*UNIT_KEY, "sku_barcode", "sku_name", "unit_cost", "source_row"]].drop_duplicates()
+        metadata = units[[*UNIT_KEY, "sku_barcode", "sku_name", "unit_cost", "expiry_date", "source_row"]].drop_duplicates()
         if metadata.duplicated(UNIT_KEY).any():
             raise CleaningInputError("재고관리단위가 중복되었어요")
         if metadata.groupby("sku_barcode")["unit_cost"].nunique(dropna=False).gt(1).any():
@@ -102,10 +105,11 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
                          unit_cost=None if pd.isna(row.unit_cost) else int(row.unit_cost),
                          is_new=bc not in known_barcodes)
                     for bc, row in product_info.iterrows()]
-        inventory_units = metadata[[*UNIT_KEY, "sku_barcode"]].to_dict("records")
+        inventory_units = [{**u, "expiry_date": None if pd.isna(u["expiry_date"]) else u["expiry_date"]}
+                           for u in metadata[[*UNIT_KEY, "sku_barcode", "expiry_date"]].to_dict("records")]
         records = units[units.stock_date >= units.received_on].merge(grid[[*UNIT_KEY, "stock_date", "opening_qty"]],
                               on=[*UNIT_KEY, "stock_date"], validate="one_to_one")
-        records = records.drop(columns=["source_file", "sku_barcode", "sku_name", "unit_cost"])
+        records = records.drop(columns=["source_file", "sku_barcode", "sku_name", "unit_cost", "expiry_date"])
         records["upload_file_id"] = source.upload_file_id
         product_daily["upload_file_id"] = source.upload_file_id
         excluded = []
@@ -190,6 +194,7 @@ def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: b
         missing = set(ID_HEADERS.values()) - set(id_cols)
         if missing:
             raise ValueError(f"수불부 열을 찾을 수 없어요: {sorted(missing)}")
+        optional_cols = {OPTIONAL_HEADERS[v]: i for i, v in enumerate(header) if v in OPTIONAL_HEADERS}
         days = [  # (날짜, 입고 칸 위치). 한 날짜는 입고 · 출고 · 조정 · 재고 4칸
             (date(year, month, int(m.group(1))), i)
             for i, v in enumerate(day_row)
@@ -217,6 +222,8 @@ def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: b
                 "sku_barcode": _to_text(row[id_cols["sku_barcode"]]),
                 "sku_name": str(row[id_cols["sku_name"]]),
                 "unit_cost": row[id_cols["unit_cost"]],
+                "expiry_date": (_to_expiry(row[optional_cols["expiry_date"]])
+                                if "expiry_date" in optional_cols and optional_cols["expiry_date"] < len(row) else None),
             }
             if any(
                 not str(unit[k]).strip() or str(unit[k]) == "None"
@@ -256,7 +263,7 @@ def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: b
                 })
         return pd.DataFrame(records, columns=[
             "source_file", "source_sheet", "source_row", "source_inventory_key", "received_on",
-            "sku_barcode", "sku_name", "unit_cost", "stock_date", *MOVES, "closing_qty",
+            "sku_barcode", "sku_name", "unit_cost", "expiry_date", "stock_date", *MOVES, "closing_qty",
         ])
 
     finally:
@@ -347,6 +354,27 @@ def _to_date(value) -> date:
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value).strip()[:10])
+
+
+def _to_expiry(value) -> date | None:
+    """유통기한 칸 → 날짜. 예: '2027-03-15 00:00:00.000 Asia/Seoul' → 2027-03-15.
+
+    유통기한은 선택 정보라 비었거나('-' 포함) 날짜로 못 읽으면 정제를 막지 않고 None으로 둔다(#97).
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+    match = EXPIRY_DATE.match(str(value)[:40])
+    if not match:
+        return None
+    year, month, day = (int(match[1]), int(match[2] or match[4]), int(match[3] or match[5]))
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
 
 
 def _to_text(value) -> str:

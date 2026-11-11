@@ -18,7 +18,7 @@ BLANK = (None, None, None, None)
 def build_ledger(days: list[int], units: list[dict]) -> bytes:
     """units 항목: barcode · name · cost · mixed_id · received_on · records({일: (입고, 출고, 조정, 재고)}).
 
-    records에 없는 날은 빈칸이다.
+    records에 없는 날은 빈칸이다. expiry(선택)는 유통기한 칸에 그대로 넣는다(#97).
     """
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -34,7 +34,7 @@ def build_ledger(days: list[int], units: list[dict]) -> bytes:
     ws.append([None])
     for no, u in enumerate(units, 1):
         row = [
-            no, u["barcode"], None, None, None, u["received_on"], "-", "-", u["cost"], None, None,
+            no, u["barcode"], None, None, u.get("expiry"), u["received_on"], "-", "-", u["cost"], None, None,
             u["mixed_id"], u["name"], None, "테스트벤더", "FC_TEST01", "TEST_창고",
         ]
         for d in days:
