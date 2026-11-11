@@ -4,6 +4,7 @@
 오차는 입고 단위 올림 전 소수 수량이며 실제 수요가 아닌 관측 출고량과 비교한다.
 """
 import math
+from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -12,7 +13,7 @@ from numbers import Integral
 
 import pandas as pd
 
-from engine.forecast import forecast_a, forecast_b
+from engine.forecast import _PreparedForecast, forecast_a, forecast_b
 from schemas.base import Method
 from schemas.engine import BacktestRequest, BacktestResponse, Period
 
@@ -131,11 +132,66 @@ def _actual(rows: pd.DataFrame, horizon_days: int) -> tuple[float | None, SkipRe
     return (total, None) if math.isfinite(total) else (None, SkipReason.INVALID_ACTUALS)
 
 
+class _QuantityIndex:
+    """정렬된 한 상품의 검사 결과를 누적 개수로 보관한다. 수량 합계(개)는 기존 fsum을 쓴다.
+
+    숫자형과 bool 관측 열에만 사용한다. 형 변환이 필요한 열은 기존 검사 경로에 남긴다.
+    날짜 경계 안의 오류만 판정하므로 미래 오류로 과거 이력을 거부하지 않는다.
+    """
+
+    def __init__(self, sku: pd.DataFrame):
+        self._sku = sku
+        self._dates = tuple(sku["stock_date"])
+        self._qty = sku["outbound_qty"]
+        valid = sku["is_valid_observation"]
+        good = self._qty.map(lambda value: pd.notna(value) and math.isfinite(value) and value >= 0).astype(bool)
+        self._invalid = [0, *(valid & ~good).cumsum().tolist()]
+        self._unobserved = [0, *(~valid).cumsum().tolist()]
+        self._duplicates = [0, *sku["stock_date"].duplicated().cumsum().tolist()]
+        self._forecast = None
+
+    def forecast(self) -> _PreparedForecast:
+        """수량 검사를 통과한 기준일 조회에만 쓰는 상품별 기간 집계를 지연 준비한다."""
+        if self._forecast is None:
+            self._forecast = _PreparedForecast(self._sku)
+        return self._forecast
+
+    @staticmethod
+    def supports(sku: pd.DataFrame) -> bool:
+        dtype = sku["outbound_qty"].dtype
+        return (not isinstance(dtype, pd.api.extensions.ExtensionDtype) and dtype.kind in "iuf"
+                and sku["is_valid_observation"].dtype == bool)
+
+    def history(self, origin: date) -> tuple[pd.DataFrame, SkipReason | None]:
+        right = bisect_right(self._dates, origin)
+        reason = (SkipReason.DUPLICATE_RECORDS if self._duplicates[right] else
+                  SkipReason.INVALID_HISTORY if self._invalid[right] else None)
+        return self._sku.iloc[:right], reason
+
+    def actual(self, origin: date, end: date, horizon_days: int) -> tuple[float | None, SkipReason | None]:
+        left, right = bisect_right(self._dates, origin), bisect_right(self._dates, end)
+        if self._duplicates[right] != self._duplicates[left]:
+            return None, SkipReason.DUPLICATE_RECORDS
+        if right - left != horizon_days:
+            return None, SkipReason.INCOMPLETE_ACTUALS
+        if self._unobserved[right] != self._unobserved[left]:
+            return None, SkipReason.UNOBSERVED_ACTUALS
+        if self._invalid[right] != self._invalid[left]:
+            return None, SkipReason.INVALID_ACTUALS
+        try:
+            total = math.fsum(self._qty.iloc[left:right])
+        except OverflowError:
+            return None, SkipReason.INVALID_ACTUALS
+        return (total, None) if math.isfinite(total) else (None, SkipReason.INVALID_ACTUALS)
+
+
 def _generate_error_samples(
     product_daily: pd.DataFrame, *, origins: Sequence[date], horizon_days: int,
     period: Period, period_name: SamplePeriod, observed_through: date,
     product_ids: Sequence[int] | None = None, methods: Sequence[Method] = (Method.A, Method.B),
     _history_cache: dict | None = None,
+    _quantity_cache: dict | None = None,
+    _source_cache: dict | None = None,
 ) -> ErrorSampleBatch:
     """명시한 기준일별 A/B를 검증한다. 기본 정책·대체 산식·위험도를 선택하지 않는다.
 
@@ -157,21 +213,35 @@ def _generate_error_samples(
     if (not isinstance(product_daily, pd.DataFrame) or not product_daily.columns.is_unique
             or not set(_COLUMNS) <= set(product_daily.columns)):
         raise BacktestInputError("상품 일별 기록에 필요한 열이 없어요")
-    daily = product_daily[_COLUMNS].copy(deep=True)
     ids = _ids(product_ids) if product_ids is not None else None
-    if ids is not None:
-        daily = daily[daily["product_id"].isin(ids)]
-    if not daily["stock_date"].map(lambda v: type(v) is date).all():
-        raise BacktestInputError("stock_date는 날짜여야 해요")
-    daily = daily[daily["stock_date"] <= observed_through]
-    if ids is None:
-        ids = _ids(list(daily["product_id"].unique()))
-    if not daily["product_id"].map(lambda v: isinstance(v, Integral) and not isinstance(v, bool)).all():
-        raise BacktestInputError("상품 ID 열은 정수여야 해요")
-    daily = daily.sort_values(["product_id", "stock_date"])
+    source_key = (tuple(ids) if ids is not None else None, observed_through)
+    if _source_cache is not None and source_key in _source_cache:
+        daily, ids = _source_cache[source_key]
+    else:
+        daily = product_daily[_COLUMNS].copy(deep=True)
+        if ids is not None:
+            daily = daily[daily["product_id"].isin(ids)]
+        if not daily["stock_date"].map(lambda v: type(v) is date).all():
+            raise BacktestInputError("stock_date는 날짜여야 해요")
+        daily = daily[daily["stock_date"] <= observed_through]
+        if ids is None:
+            ids = _ids(list(daily["product_id"].unique()))
+        if not daily["product_id"].map(lambda v: isinstance(v, Integral) and not isinstance(v, bool)).all():
+            raise BacktestInputError("상품 ID 열은 정수여야 해요")
+        daily = daily.sort_values(["product_id", "stock_date"])
+        if _source_cache is not None:
+            if len(_source_cache) >= 4:
+                del _source_cache[next(iter(_source_cache))]
+            _source_cache[source_key] = (daily, ids)
     samples, skipped = [], []
     for product_id in ids:
         sku = daily[daily["product_id"] == product_id]
+        quantity_index = None
+        if _quantity_cache is not None:
+            quantity_key = (product_id, observed_through)
+            if quantity_key not in _quantity_cache:
+                _quantity_cache[quantity_key] = _QuantityIndex(sku) if _QuantityIndex.supports(sku) else None
+            quantity_index = _quantity_cache[quantity_key]
         for origin in dates:
             try:
                 end = origin + timedelta(days=horizon_days)
@@ -187,23 +257,35 @@ def _generate_error_samples(
                 if _history_cache is not None and key in _history_cache:
                     history, reason = _history_cache[key]
                 else:
-                    history = sku[sku["stock_date"] <= origin].copy(deep=True)
-                    if history["stock_date"].duplicated().any():
-                        reason = SkipReason.DUPLICATE_RECORDS
+                    if quantity_index is not None:
+                        history, reason = quantity_index.history(origin)
                     else:
-                        history = _quantities(history)
-                        if history is None:
-                            reason = SkipReason.INVALID_HISTORY
+                        history = sku[sku["stock_date"] <= origin].copy(deep=True)
+                        if history["stock_date"].duplicated().any():
+                            reason = SkipReason.DUPLICATE_RECORDS
+                        else:
+                            history = _quantities(history)
+                            if history is None:
+                                reason = SkipReason.INVALID_HISTORY
+                    if reason is None and _history_cache is not None:
+                        history = (quantity_index.forecast() if quantity_index is not None
+                                   else _PreparedForecast(history))
                     if _history_cache is not None:
                         _history_cache[key] = (history, reason)
             if reason is not None:
                 skipped.extend(SkippedSample(**context, method=m, reason=reason, detail=reason.value)
                                for m in selected_methods)
                 continue
-            target = sku[(sku["stock_date"] > origin) & (sku["stock_date"] <= end)]
-            actual, actual_reason = _actual(target, horizon_days)
+            if quantity_index is not None:
+                actual, actual_reason = quantity_index.actual(origin, end, horizon_days)
+            else:
+                target = sku[(sku["stock_date"] > origin) & (sku["stock_date"] <= end)]
+                actual, actual_reason = _actual(target, horizon_days)
             for method in selected_methods:
-                forecast = (forecast_a if method == Method.A else forecast_b)(history, origin, horizon_days)
+                if isinstance(history, _PreparedForecast):
+                    forecast = (history.forecast_a if method == Method.A else history.forecast_b)(origin, horizon_days)
+                else:
+                    forecast = (forecast_a if method == Method.A else forecast_b)(history, origin, horizon_days)
                 predicted = forecast.qty
                 if predicted is None:
                     skipped.append(SkippedSample(**context, method=method, reason=SkipReason.FORECAST_UNAVAILABLE,
@@ -236,7 +318,7 @@ def generate_error_samples(
 
 
 def generate_error_sample_batches(product_daily: pd.DataFrame, plans: Sequence[dict]) -> tuple[ErrorSampleBatch, ...]:
-    """여러 H/D 평가에서 동일 SKU·기준일의 이력 검증만 재사용한다. 결과·산식·표본 개수는 동일하다.
+    """여러 H/D 평가에서 동일 SKU·기준일의 이력 검증·기간 집계를 재사용한다.
 
     캐시는 이 함수 안의 SKU 하나에만 존재하며 요청·상품 간 공유하거나 미래 이력을 전달하지 않는다.
     한 SKU를 끝내면 폐기하므로 전체 원장의 모든 prefix를 동시에 보관하지 않는다.
@@ -253,11 +335,14 @@ def generate_error_sample_batches(product_daily: pd.DataFrame, plans: Sequence[d
     for product_id in ids:
         sku = product_daily[product_daily.product_id == product_id]
         history_cache = {}
+        quantity_cache = {}
+        source_cache = {}
         for i, plan in enumerate(plans):
             if product_id not in ids_by_plan[i]:
                 continue
             batch = _generate_error_samples(sku, **{**plan, "product_ids": [product_id]},
-                                             _history_cache=history_cache)
+                                             _history_cache=history_cache, _quantity_cache=quantity_cache,
+                                             _source_cache=source_cache)
             samples[i].extend(batch.samples)
             skipped[i].extend(batch.skipped)
     return tuple(replace(t, samples=tuple(samples[i]), skipped=tuple(skipped[i])) for i, t in enumerate(templates))

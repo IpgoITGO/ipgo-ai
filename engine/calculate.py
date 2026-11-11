@@ -15,7 +15,7 @@ from engine.replenish import (
     start_stock,
     stockout_since,
 )
-from engine.risk import RiskContext, select_risk_samples
+from engine.risk import RiskContext, _RiskSelector, select_risk_samples
 from engine.scenario import simulate, stockout_risk
 from schemas.base import Method, ResultStatus, RiskStatus, ScenarioType
 from schemas.engine import (
@@ -162,14 +162,15 @@ def _scenario(
 
 def _apply_risk(
     result: ProductResult, request: CalculateRequest, daily: pd.DataFrame, settings: ProductSettings,
-    planned: dict[int, float], context: RiskContext | None,
+    planned: dict[int, float], context: RiskContext | None, selector: _RiskSelector | None = None,
 ) -> None:
     """동일한 표본으로 도착 전 공통·도착 후 시나리오별 위험을 채운다. 원래 수량/재고는 바꾸지 않는다."""
     if context is None or result.status not in (ResultStatus.OK, ResultStatus.NOT_NEEDED):
         return
     gap = (request.today - request.as_of_date).days
-    selection = select_risk_samples(
-        context, product_id=result.product_id, method=result.method,
+    choose = selector.select if selector is not None else lambda **kwargs: select_risk_samples(context, **kwargs)
+    selection = choose(
+        product_id=result.product_id, method=result.method,
         horizon_days=gap + result.horizon_days, observed_through=request.as_of_date,
     )
     result.risk_sample_size = len(selection.samples)
@@ -201,7 +202,7 @@ def _apply_risk(
     result.risk_basis = selection.basis
 
 
-def _apply_accuracy(result, request, settings, context, indexed):
+def _apply_accuracy(result, request, settings, context, indexed, selector=None):
     """동일 산식·H의 확정 TUNE 커버 실적과 D 비율의 LOW 범위를 연결한다(개·비율)."""
     if result.status not in (ResultStatus.OK, ResultStatus.NOT_NEEDED) or context is None:
         return
@@ -219,7 +220,8 @@ def _apply_accuracy(result, request, settings, context, indexed):
     result.cover_trial_count = accuracy.cover_trial_count
     result.forecast_error_rate = accuracy.forecast_error_rate
     if result.accuracy_grade is not None and result.accuracy_grade.value == "LOW":
-        selection = select_risk_samples(context, product_id=result.product_id, method=result.method,
+        choose = selector.select if selector is not None else lambda **kwargs: select_risk_samples(context, **kwargs)
+        selection = choose(product_id=result.product_id, method=result.method,
             horizon_days=(request.today-request.as_of_date).days + result.horizon_days,
             observed_through=request.as_of_date)
         if selection.basis is not None:
@@ -234,13 +236,23 @@ def calculate(
     settings, daily, ids = _inputs(request, product_daily)
     results = []
     indexed = {}
+    selector = _RiskSelector(risk_context) if risk_context is not None else None
     if risk_context is not None:
         from engine.evaluation import index_daily
         indexed = index_daily(daily[(daily.stock_date >= risk_context.period_start)
                                     & (daily.stock_date <= min(request.as_of_date, risk_context.period_end))])
+    # 원본/pooled 표본 범위는 유지한다. 정수 상품 ID만 위치로 묶고 다른 자료형은 기존 비교를 쓴다.
+    dtype = daily["product_id"].dtype
+    positions = (daily.groupby("product_id", sort=False).indices
+                 if not isinstance(dtype, pd.api.extensions.ExtensionDtype) and dtype.kind in "iu" else None)
+    empty = daily.iloc[:0]
     for product_id in ids:
+        sku_daily = daily
+        if positions is not None:
+            rows = positions.get(product_id)
+            sku_daily = daily.iloc[rows] if rows is not None else empty
         config = settings.get(product_id)
-        result, planned = _product(request, daily, product_id, config)
+        result, planned = _product(request, sku_daily, product_id, config)
         result.no_date_receipt_qty = sum(r.quantity for r in request.no_date_receipts if r.product_id == product_id)
         if result.status is ResultStatus.OK:
             for kind, percent in [(ScenarioType.P80, 80), (ScenarioType.P100, 100), (ScenarioType.P120, 120)]:
@@ -249,8 +261,8 @@ def calculate(
                     result, config, request.today, planned, qty, kind,
                     duplicate=kind is not ScenarioType.P100 and qty == result.recommended_qty,
                 ))
-        _apply_accuracy(result, request, config, risk_context, indexed)
-        _apply_risk(result, request, daily, config, planned, risk_context)
+        _apply_accuracy(result, request, config, risk_context, indexed, selector)
+        _apply_risk(result, request, sku_daily, config, planned, risk_context, selector)
         result.insight_input = to_insight_input(result, "이 상품", as_of_date=request.as_of_date)
         results.append(result)
     return CalculateResponse(engine_version=ENGINE_VERSION, results=results)

@@ -6,6 +6,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
+import pandas as pd
 import pytest
 
 from app import repository
@@ -70,9 +71,72 @@ def test_capacity_boundaries():
         validate_calculation_capacity(req)
     req.settings[0].review_cycle_days = 365
     req.product_ids = None
-    req.settings = [req.settings[0].model_copy(update={"product_id": n}) for n in range(10)]
+    req.settings = [req.settings[0].model_copy(update={"product_id": n}) for n in range(55)]
     with pytest.raises(CalculationInputError):
         validate_calculation_capacity(req)
+
+
+@pytest.mark.parametrize(("products", "days", "allowed"), [
+    (284, 19, True),  # #96: 284 × 3 × 19 = 16,188
+    (284, 12, True),
+    (300, 66, True),  # 59,400
+    (999, 20, True),
+    (1000, 20, True),  # 60,000까지 허용
+    (1001, 20, False),
+])
+def test_calculation_scenario_capacity(products, days, allowed):
+    req = CalculateRequest.model_validate(CALC_REQUEST)
+    req.product_ids = None
+    req.settings = [req.settings[0].model_copy(update={
+        "product_id": n, "lead_time_days": 5, "review_cycle_days": days - 5,
+    }) for n in range(products)]
+    if allowed:
+        validate_calculation_capacity(req)
+    else:
+        with pytest.raises(CalculationInputError, match="시나리오"):
+            validate_calculation_capacity(req)
+
+
+def test_capacity_counts_only_selected_products():
+    req = CalculateRequest.model_validate(CALC_REQUEST)
+    req.settings = [req.settings[0].model_copy(update={
+        "product_id": n, "lead_time_days": 5, "review_cycle_days": 15,
+    }) for n in range(1001)]
+    req.product_ids = list(range(1000))
+    validate_calculation_capacity(req)
+    req.product_ids.append(1000)
+    with pytest.raises(CalculationInputError, match="시나리오"):
+        validate_calculation_capacity(req)
+
+
+def test_expanded_capacity_calculates_and_transports_results(monkeypatch):
+    from app import jobs
+    from app.result_transport import MAX_RESULT_BYTES, encode_result
+
+    # 하루 출고 1개, 시작 재고 9개: 66일 필요량 66 - 9 = 57개.
+    products = range(1, 301)
+    daily = pd.DataFrame([{
+        "product_id": product, "upload_file_id": 1, "stock_date": date(2026, 5, day),
+        "outbound_qty": 1, "closing_qty": 9, "is_valid_observation": True,
+    } for product in products for day in range(1, 32)])
+    monkeypatch.setattr(jobs.repository, "load_product_daily", lambda *_args, **_kwargs: daily)
+    request = CalculateRequest.model_validate({
+        "runId": 1, "userId": 1, "warehouseId": 1, "uploadFileIds": [1],
+        "asOfDate": "2026-05-31", "today": "2026-05-31", "policy": {"defaultMethod": "B"},
+        "settings": [{"productId": product, "leadTimeDays": 5, "reviewCycleDays": 61,
+                      "orderUnitQty": 1, "unitCost": 10} for product in products],
+    })
+    result = jobs.execute(jobs.JobEnvelope(
+        contract_version="1", job_id="capacity-test", job_type=jobs.JobType.CALCULATE,
+        payload=request.to_json_dict(),
+    ))
+    assert result.status == jobs.JobStatus.SUCCEEDED
+    assert len(result.result["results"]) == 300
+    assert all(row["status"] == "OK" and row["recommendedQty"] == 57
+               and len(row["scenarios"]) == 3
+               and all(len(scenario["dailyProjection"]) == 66 for scenario in row["scenarios"])
+               for row in result.result["results"])
+    assert len(encode_result(result).encode()) <= MAX_RESULT_BYTES
 
 
 def test_busy_http_and_worker_leave_message(client, monkeypatch):

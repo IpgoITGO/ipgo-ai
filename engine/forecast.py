@@ -1,4 +1,6 @@
 """DA-03 커버 기간 출고량 예측. 결과는 소수(float)."""
+from bisect import bisect_left, bisect_right
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -45,6 +47,12 @@ def forecast_a(
     product_daily: 한 상품의 stock_date · outbound_qty · is_valid_observation (DA-02). t 이후 기록은 쓰지 않는다.
     """
     daily = _until(product_daily, as_of)
+    return _forecast_a(as_of, forecast_days, trend_bounds, lambda start, end: _valid_sum(daily, start, end))
+
+
+def _forecast_a(as_of: date, forecast_days: int, trend_bounds: tuple[float, float] | None,
+                window_sum: Callable[[date, date], tuple[int, float]]) -> ForecastA:
+    """A 출고량(개) = 작년 구간 평균 × 예측 일수 × 올해/작년 90일 평균 비율."""
     last_year = _last_year(as_of)
     windows = {
         "P_H": (last_year + timedelta(days=1), last_year + timedelta(days=forecast_days)),
@@ -53,7 +61,7 @@ def forecast_a(
     }
     means = {}
     for name, (start, end) in windows.items():
-        days, total = _valid_sum(daily, start, end)
+        days, total = window_sum(start, end)
         if days < A_MIN_VALID_DAYS:
             reason = f"{A_WINDOW_LABELS[name]}({start} ~ {end}) 판매한 날이 {days}일로 {A_MIN_VALID_DAYS}일보다 적어요"
             return ForecastA(None, reason)
@@ -74,12 +82,48 @@ def forecast_b(product_daily: pd.DataFrame, as_of: date, forecast_days: int) -> 
     기록이 28일보다 짧으면 있는 만큼으로 계산. 유효일이 7일 미만이면 사용 불가. t 이후 기록은 쓰지 않는다.
     """
     daily = _until(product_daily, as_of)
-    days, total = _valid_sum(daily, as_of - timedelta(days=B_WINDOW_MAX - 1), as_of)
+    return _forecast_b(as_of, forecast_days, lambda start, end: _valid_sum(daily, start, end))
+
+
+def _forecast_b(as_of: date, forecast_days: int,
+                window_sum: Callable[[date, date], tuple[int, float]]) -> ForecastB:
+    """B 출고량(개) = 최근 28일 유효일 출고 합계 ÷ 유효일 수 × 예측 일수."""
+    days, total = window_sum(as_of - timedelta(days=B_WINDOW_MAX - 1), as_of)
     if days < MIN_VALID_DAYS:
         reason = f"최근 {B_WINDOW_MAX}일 중 판매한 날이 {days}일로 {MIN_VALID_DAYS}일보다 적어요"
         return ForecastB(None, reason, days, total)
     mean = total / days
     return ForecastB(mean * forecast_days, None, days, total, mean)
+
+
+class _PreparedForecast:
+    """검증된 한 상품 이력의 기간별 유효일 수·출고 합계(개)를 요청 안에서 재사용한다.
+
+    날짜가 정렬된 숫자 이력을 받으며 호출자는 각 기준일의 수량 검사를 먼저 통과해야 한다.
+    조회는 항상 기준일 이하로 잘라 미래 기록을 쓰지 않는다.
+    누적합 차감 대신 기존 Series.sum을 같은 순서의 구간에 적용해 소수 합산을 보존한다.
+    """
+
+    def __init__(self, history: pd.DataFrame):
+        valid = history.loc[history["is_valid_observation"]]
+        self._dates = tuple(valid["stock_date"])
+        self._outbound = valid["outbound_qty"].reset_index(drop=True)
+        self._sums: dict[tuple[date, date], tuple[int, float]] = {}
+
+    def _sum(self, start: date, end: date) -> tuple[int, float]:
+        key = (start, end)
+        if key not in self._sums:
+            left, right = bisect_left(self._dates, start), bisect_right(self._dates, end)
+            self._sums[key] = (max(0, right - left), float(self._outbound.iloc[left:right].sum()))
+        return self._sums[key]
+
+    def forecast_a(self, as_of: date, forecast_days: int,
+                   trend_bounds: tuple[float, float] | None = TREND_BOUNDS) -> ForecastA:
+        return _forecast_a(as_of, forecast_days, trend_bounds,
+                           lambda start, end: self._sum(start, min(end, as_of)))
+
+    def forecast_b(self, as_of: date, forecast_days: int) -> ForecastB:
+        return _forecast_b(as_of, forecast_days, lambda start, end: self._sum(start, min(end, as_of)))
 
 
 def _until(product_daily: pd.DataFrame, as_of: date) -> pd.DataFrame:

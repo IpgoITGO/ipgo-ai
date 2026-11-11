@@ -86,10 +86,23 @@ def select_risk_samples(
     pooled는 대상 SKU도 포함한 동일 조건 전체 SKU다. 모두 부족하면 basis=None과 실제 후보 수를 반환한다.
     겹치는 평가 창도 유지하지만 독립 표본 수나 신뢰구간으로 해석하지 않는다.
     """
+    _validate_selection(context, product_id, method, horizon_days, observed_through)
+    eligible, excluded = _collect_candidates(context, method, horizon_days, observed_through)
+    sku = tuple(s for s in eligible if s.product_id == product_id)
+    if len(sku) >= context.min_samples:
+        return RiskSelection(sku, RiskBasis.SKU, excluded)
+    basis = RiskBasis.POOLED if len(eligible) >= context.min_samples else None
+    return RiskSelection(eligible, basis, excluded)
+
+
+def _validate_selection(context, product_id, method, horizon_days, observed_through):
     if (not isinstance(context, RiskContext) or type(product_id) is not int or product_id < 1
             or not isinstance(method, Method) or type(horizon_days) is not int or horizon_days < 1
             or type(observed_through) is not date):
         raise RiskInputError("상품·실제 산식·예측 일수·관측 확정일을 확인해 주세요")
+
+
+def _collect_candidates(context, method, horizon_days, observed_through):
     eligible, excluded, seen = [], [], set()
     for batch in context.batches:
         if (type(batch.observed_through) is not date or type(batch.period_start) is not date
@@ -125,9 +138,35 @@ def select_risk_samples(
             else:
                 eligible.append(sample)
     eligible.sort(key=lambda s: (s.product_id, s.origin_date))
-    sku = tuple(s for s in eligible if s.product_id == product_id)
-    if len(sku) >= context.min_samples:
-        return RiskSelection(sku, RiskBasis.SKU, tuple(excluded))
-    pooled = tuple(eligible)
-    basis = RiskBasis.POOLED if len(pooled) >= context.min_samples else None
-    return RiskSelection(pooled, basis, tuple(excluded))
+    return tuple(eligible), tuple(excluded)
+
+
+class _RiskSelector:
+    """한 요청의 같은 context·산식·기간·관측일 후보를 처음 필요할 때 검사해 재사용한다.
+
+    조건이 많아도 제외 목록을 무한 보관하지 않도록 최대 네 조건만 유지한다.
+    """
+
+    def __init__(self, context: RiskContext):
+        self._context = context
+        self._candidates = {}
+
+    def select(self, *, product_id: int, method: Method, horizon_days: int,
+               observed_through: date) -> RiskSelection:
+        context = self._context
+        _validate_selection(context, product_id, method, horizon_days, observed_through)
+        key = (method, horizon_days, observed_through)
+        if key not in self._candidates:
+            pooled, excluded = _collect_candidates(context, method, horizon_days, observed_through)
+            by_product = {}
+            for sample in pooled:
+                by_product.setdefault(sample.product_id, []).append(sample)
+            if len(self._candidates) >= 4:
+                del self._candidates[next(iter(self._candidates))]
+            self._candidates[key] = (pooled, excluded, {p: tuple(rows) for p, rows in by_product.items()})
+        pooled, excluded, by_product = self._candidates[key]
+        sku = by_product.get(product_id, ())
+        if len(sku) >= context.min_samples:
+            return RiskSelection(sku, RiskBasis.SKU, excluded)
+        basis = RiskBasis.POOLED if len(pooled) >= context.min_samples else None
+        return RiskSelection(pooled, basis, excluded)
