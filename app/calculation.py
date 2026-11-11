@@ -1,10 +1,8 @@
 """HTTP와 SQS의 공통 계산 경로. 읽기 권한을 확인한 동일 DataFrame만 표본과 계산에 사용한다."""
-import hashlib
-import json
-
 import pandas as pd
 
 from app.risk_policy import load_risk_policy
+from app.source_digest import source_digest
 from engine import calculate as core
 from engine.risk_sampling import prepare_risk_context
 from engine.scenario import RiskInputError
@@ -21,34 +19,9 @@ def calculate(request: CalculateRequest, daily: pd.DataFrame) -> CalculateRespon
     try:
         context = _context(request, daily)
         response = core.calculate(request, daily, risk_context=context)
-        # v1 digest: selected sources through asOfDate; sorted rows, explicit canonical types.
-        # Stream rows so history provenance does not build a second full JSON dataset in memory.
+        # 선택 source·기준일 범위와 v1 지문 계약은 유지한다.
         _, source_daily, _ = core._inputs(request, daily)
-        columns = sorted(c for c in source_daily.columns if c in {
-            "product_id", "upload_file_id", "stock_date", "opening_qty", "inbound_qty", "outbound_qty",
-            "adjustment_qty", "closing_qty", "is_valid_observation"})
-        data = source_daily.sort_values(["product_id", "stock_date", "upload_file_id"])
-        digest_builder = hashlib.sha256(json.dumps(columns, separators=(",", ":")).encode() + b"\n")
-        for row in data[columns].itertuples(index=False, name=None):
-            values = []
-            for key, value in zip(columns, row, strict=True):
-                if key in ("product_id", "upload_file_id"):
-                    values.append(str(int(value)))
-                elif key == "stock_date":
-                    values.append(value.isoformat())
-                elif key == "is_valid_observation":
-                    values.append(bool(value))
-                else:
-                    # 상품별 입력 오류는 core의 판정을 유지한다. digest는 오류 표식만 기록한다.
-                    try:
-                        number = float(value)
-                    except (TypeError, ValueError):
-                        values.append("invalid")
-                        continue
-                    # float.hex는 NaN/±Infinity도 JSON 숫자 대신 nan/inf/-inf 문자열로 남긴다.
-                    values.append((0.0 if number == 0 else number).hex())
-            digest_builder.update(json.dumps(values, separators=(",", ":"), allow_nan=False).encode() + b"\n")
-        digest = digest_builder.hexdigest()
+        digest = source_digest(source_daily)
         for result in response.results:
             evaluated = context is not None and result.status.value in ("OK", "NOT_NEEDED")
             history = sorted(result.accuracy_history, key=lambda point: point.origin_date)
