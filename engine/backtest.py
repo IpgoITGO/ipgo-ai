@@ -191,6 +191,7 @@ def _generate_error_samples(
     product_ids: Sequence[int] | None = None, methods: Sequence[Method] = (Method.A, Method.B),
     _history_cache: dict | None = None,
     _quantity_cache: dict | None = None,
+    _source_cache: dict | None = None,
 ) -> ErrorSampleBatch:
     """명시한 기준일별 A/B를 검증한다. 기본 정책·대체 산식·위험도를 선택하지 않는다.
 
@@ -212,18 +213,26 @@ def _generate_error_samples(
     if (not isinstance(product_daily, pd.DataFrame) or not product_daily.columns.is_unique
             or not set(_COLUMNS) <= set(product_daily.columns)):
         raise BacktestInputError("상품 일별 기록에 필요한 열이 없어요")
-    daily = product_daily[_COLUMNS].copy(deep=True)
     ids = _ids(product_ids) if product_ids is not None else None
-    if ids is not None:
-        daily = daily[daily["product_id"].isin(ids)]
-    if not daily["stock_date"].map(lambda v: type(v) is date).all():
-        raise BacktestInputError("stock_date는 날짜여야 해요")
-    daily = daily[daily["stock_date"] <= observed_through]
-    if ids is None:
-        ids = _ids(list(daily["product_id"].unique()))
-    if not daily["product_id"].map(lambda v: isinstance(v, Integral) and not isinstance(v, bool)).all():
-        raise BacktestInputError("상품 ID 열은 정수여야 해요")
-    daily = daily.sort_values(["product_id", "stock_date"])
+    source_key = (tuple(ids) if ids is not None else None, observed_through)
+    if _source_cache is not None and source_key in _source_cache:
+        daily, ids = _source_cache[source_key]
+    else:
+        daily = product_daily[_COLUMNS].copy(deep=True)
+        if ids is not None:
+            daily = daily[daily["product_id"].isin(ids)]
+        if not daily["stock_date"].map(lambda v: type(v) is date).all():
+            raise BacktestInputError("stock_date는 날짜여야 해요")
+        daily = daily[daily["stock_date"] <= observed_through]
+        if ids is None:
+            ids = _ids(list(daily["product_id"].unique()))
+        if not daily["product_id"].map(lambda v: isinstance(v, Integral) and not isinstance(v, bool)).all():
+            raise BacktestInputError("상품 ID 열은 정수여야 해요")
+        daily = daily.sort_values(["product_id", "stock_date"])
+        if _source_cache is not None:
+            if len(_source_cache) >= 4:
+                del _source_cache[next(iter(_source_cache))]
+            _source_cache[source_key] = (daily, ids)
     samples, skipped = [], []
     for product_id in ids:
         sku = daily[daily["product_id"] == product_id]
@@ -327,11 +336,13 @@ def generate_error_sample_batches(product_daily: pd.DataFrame, plans: Sequence[d
         sku = product_daily[product_daily.product_id == product_id]
         history_cache = {}
         quantity_cache = {}
+        source_cache = {}
         for i, plan in enumerate(plans):
             if product_id not in ids_by_plan[i]:
                 continue
             batch = _generate_error_samples(sku, **{**plan, "product_ids": [product_id]},
-                                             _history_cache=history_cache, _quantity_cache=quantity_cache)
+                                             _history_cache=history_cache, _quantity_cache=quantity_cache,
+                                             _source_cache=source_cache)
             samples[i].extend(batch.samples)
             skipped[i].extend(batch.skipped)
     return tuple(replace(t, samples=tuple(samples[i]), skipped=tuple(skipped[i])) for i, t in enumerate(templates))
