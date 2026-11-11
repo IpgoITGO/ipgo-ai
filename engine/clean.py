@@ -70,7 +70,8 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
             raise CleaningInputError("수불부 날짜가 업로드 기간을 벗어났어요")
         if previous_units and units.stock_date.min().day != 1:
             raise CleaningInputError("전월 재고와 연결할 때 이번 자료는 1일부터 연속되어야 해요")
-        metadata = units[[*UNIT_KEY, "sku_barcode", "sku_name", "unit_cost", "expiry_date", "source_row"]].drop_duplicates()
+        metadata = units[[*UNIT_KEY, "sku_barcode", "sku_name", "unit_cost", "expiry_date",
+                          "source_row"]].drop_duplicates()
         if metadata.duplicated(UNIT_KEY).any():
             raise CleaningInputError("재고관리단위가 중복되었어요")
         if metadata.groupby("sku_barcode")["unit_cost"].nunique(dropna=False).gt(1).any():
@@ -195,6 +196,7 @@ def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: b
         if missing:
             raise ValueError(f"수불부 열을 찾을 수 없어요: {sorted(missing)}")
         optional_cols = {OPTIONAL_HEADERS[v]: i for i, v in enumerate(header) if v in OPTIONAL_HEADERS}
+        expiry_col = optional_cols.get("expiry_date")
         days = [  # (날짜, 입고 칸 위치). 한 날짜는 입고 · 출고 · 조정 · 재고 4칸
             (date(year, month, int(m.group(1))), i)
             for i, v in enumerate(day_row)
@@ -213,6 +215,7 @@ def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: b
                 if any(row[id_cols[name]] is not None for name in ("source_inventory_key", "sku_name", "received_on")):
                     raise CleaningInputError("바코드가 없는 재고 기록이 있어요")
                 continue
+            expiry_cell = row[expiry_col] if expiry_col is not None and expiry_col < len(row) else None
             unit = {
                 "source_file": original_name,
                 "source_sheet": ws.title,
@@ -222,8 +225,7 @@ def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: b
                 "sku_barcode": _to_text(row[id_cols["sku_barcode"]]),
                 "sku_name": str(row[id_cols["sku_name"]]),
                 "unit_cost": row[id_cols["unit_cost"]],
-                "expiry_date": (_to_expiry(row[optional_cols["expiry_date"]])
-                                if "expiry_date" in optional_cols and optional_cols["expiry_date"] < len(row) else None),
+                "expiry_date": _to_expiry(expiry_cell),
             }
             if any(
                 not str(unit[k]).strip() or str(unit[k]) == "None"
