@@ -6,7 +6,8 @@
     {"skuBarcode": "8800272420016", "skuName": "케어트릿 120g", "unitCost": 1800, "isNew": false}
   ],
   "inventoryUnits": [
-    {"sourceInventoryKey": "MK0000000125086", "skuBarcode": "8800272420016", "receivedOn": "2026-09-02"}
+    {"sourceInventoryKey": "MK0000000125086", "skuBarcode": "8800272420016", "receivedOn": "2026-09-02",
+     "expiryDate": "2027-03-15"}
   ],
   "unitDailyRecords": [
     {"uploadFileId": 21, "sourceInventoryKey": "MK0000000125086", "receivedOn": "2026-09-02",

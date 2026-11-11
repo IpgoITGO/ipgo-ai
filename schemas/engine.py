@@ -60,6 +60,7 @@ class InventoryUnit(CamelModel):
     source_inventory_key: str               # 원본 sku_mixed_id
     sku_barcode: str
     received_on: date
+    expiry_date: date | None = None         # 수불부 유통기한(#97). 비었거나 날짜로 못 읽으면 null
 
 
 class UnitDailyRecord(CamelModel):
