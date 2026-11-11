@@ -1,5 +1,7 @@
 # Ipgo AI
 
+개발 CI의 일반 테스트와 독립 실행 이미지 검사는 병렬로 수행합니다. 배포 전에는 기존 네 CI 작업의 전체 성공을 확인하며, ARM 용량·실행 이미지 import·SHA 이미지 재사용 검사를 유지합니다.
+
 LLM의 OpenAI SDK와 httpx는 배포 의존성에 포함하며 CI에서 실제 runtime 이미지의 앱 import와 client 초기화를 외부 호출 없이 검사합니다.
 
 지속 LLM의 요청 제한과 월 비용 상한 해제 승인 범위는 [지속 LLM 정책](docs/decisions/0011-continuous-insight-limits.md)을 따릅니다. 기본은OFF이며 코드 구현과 실제 활성화는 구분합니다.
