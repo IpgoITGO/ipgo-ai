@@ -6,6 +6,7 @@ from app.errors import AppError
 from engine.calculate import CalculationInputError
 
 _lock = Lock()
+MAX_SCENARIO_POINTS = 60_000
 
 
 @contextmanager
@@ -29,5 +30,5 @@ def validate_calculation_capacity(request):
     selected = set(request.product_ids) if request.product_ids is not None else None
     points = sum(3 * (s.lead_time_days + s.review_cycle_days) for s in settings
                  if selected is None or s.product_id in selected)
-    if points > 10_000:
+    if points > MAX_SCENARIO_POINTS:
         raise CalculationInputError("시나리오 예상 결과의 지원 크기를 초과했어요")
