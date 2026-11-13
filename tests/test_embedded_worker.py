@@ -74,6 +74,15 @@ def test_defaults_and_queue_required(monkeypatch):
         worker.create_worker()
 
 
+def test_receive_uses_infra_queue_default(monkeypatch):
+    monkeypatch.setattr(worker, "execute", lambda job: ResultEnvelope(job_id=job.job_id, job_type=job.job_type,
+                                                                      status=JobStatus.SUCCEEDED))
+    calls = run_message(monkeypatch, envelope())
+    assert calls[0] == ("receive", {"QueueUrl": "jobs", "MaxNumberOfMessages": 1, "WaitTimeSeconds": 20})
+    # The fake only supports receive/send/delete: queue configuration must stay in Infra.
+    assert [name for name, _kwargs in calls] == ["receive", "send", "delete"]
+
+
 def test_send_before_delete_and_failed_send_preserves_message(monkeypatch):
     monkeypatch.setattr(worker, "execute", lambda job: ResultEnvelope(job_id=job.job_id, job_type=job.job_type,
                                                                       status=JobStatus.SUCCEEDED))

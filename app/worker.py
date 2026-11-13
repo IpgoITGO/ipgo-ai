@@ -1,7 +1,7 @@
 """SQS worker. Result queue must allow at least 1 MiB messages.
 
-Jobs over 120 seconds need visibility renewal; the current 900-second visibility
-is not renewed. Jobs exceeding it may run twice;
+Visibility uses the Infra-managed jobs queue default and is not renewed.
+Jobs exceeding that timeout may run twice;
 result consumers must deduplicate by job ID. Shutdown has a bounded join, so an
 in-flight job can also be redelivered after termination.
 """
@@ -69,7 +69,7 @@ def run_loop(stop: threading.Event, settings, sqs) -> None:
         try:
             response = sqs.receive_message(
                 QueueUrl=settings.jobs_queue_url, MaxNumberOfMessages=1,
-                WaitTimeSeconds=20, VisibilityTimeout=900,
+                WaitTimeSeconds=20,
             )
         except Exception:
             logger.warning("queue receive failed; retrying")
