@@ -14,7 +14,7 @@ from insight.validator import MAX_SENTENCES, MIN_SENTENCES, PLACEHOLDER_RE
 from schemas.base import RiskStatus
 from schemas.insight import InsightInput
 
-PROMPT_VERSION = "prompt-2026.11.03-v0.6"  # v0.5 + 예시 잔여 재고 값, no_date_receipts 설명, 셀러가 확인할 사항 (#53)
+PROMPT_VERSION = "prompt-2026.11.13-v0.7"  # 상태 설명을 완결된 문장으로 전달하고 괄호 지침 보완
 SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encoding="utf-8").rstrip("\n")
 
 SCENARIOS = ("p80", "p100", "p120", "custom")  # 계약 ScenarioType을 소문자로 (#4 문서 5장)
@@ -184,15 +184,19 @@ def build_prompt(inp: InsightInput) -> Prompt:
         checks.append("도착 예정일 없는 발주 {{no_date_receipts}}개는 계산에 넣지 않음")
     if checks:  # 둘 다면 한 괄호로 (따로 주면 두 번째를 빠뜨림, 11/4 시험)
         lines.append("셀러가 확인할 사항(지침 4) — 마지막 문장 끝 마침표 앞에 덧붙일 글: (" + ", ".join(checks) + ")")
+        lines.append("확인 문구는 앞 문장을 먼저 완결한 뒤 마침표 앞에 붙이고, 기존 괄호 안에 겹쳐 넣지 않습니다.")
+    lines.append("문장 형식: 상태 설명을 문장 조각으로 복사하지 말고 완결된 존댓말로 씁니다. "
+                 "괄호는 같은 문장 안에서 열고 닫습니다.")
     if risk:
         lines.append("도착 전 품절 위험(공통): 산출됨 → {{risk_pre}}")
         if "risk_sample_size" in keys:
             lines.append("위험 기준: {{risk_basis}}, 표본 수 {{risk_sample_size}}")
     elif inp.risk_status == RiskStatus.LOW_GRADE:
-        lines.append("도착 전 품절 위험(공통): 산출하지 않음(정확도 낮음) → 대신 커버 기간 예상 출고량 범위 "
+        lines.append("도착 전 품절 위험(공통): 예측 정확도가 낮아 품절 위험은 산출하지 않았습니다. "
+                     "대신 커버 기간 예상 출고량 범위 "
                      "{{forecast_range_low}}~{{forecast_range_high}}")
     else:
-        lines.append("도착 전 품절 위험(공통): 산출되지 않음(표본 부족)")
+        lines.append("도착 전 품절 위험(공통): 과거 예측 표본이 부족해 산출하지 않았습니다.")
     scenarios = [x for x in SCENARIOS if f"qty_{x}" in keys]
     lines.append("설명할 시나리오(중복 제거 후): " + ", ".join(scenarios))
     lines += [_scenario_line(x, keys, risk) for x in scenarios]
