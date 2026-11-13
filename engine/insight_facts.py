@@ -70,9 +70,11 @@ def build_catalog(result: ProductResult, *, as_of_date: date | None = None) -> l
         keys += ["risk_pre", "risk_sample_size"]
     elif result.risk_status == RiskStatus.LOW_GRADE:
         low, high = result.forecast_range_low, result.forecast_range_high
-        if not _number(low) or not _number(high) or low > high:
-            return []
-        keys += ["forecast_range_low", "forecast_range_high"]
+        # DA07의 짧은 이력은 LOW_GRADE여도 DA13 범위 표본이 없을 수 있다.
+        if low is not None or high is not None:
+            if not _number(low) or not _number(high) or low > high:
+                return []
+            keys += ["forecast_range_low", "forecast_range_high"]
 
     for scenario in scenarios:
         if (not _number(scenario.qty) or not _number(scenario.expected_ending_stock)

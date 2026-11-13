@@ -14,7 +14,7 @@ from insight.validator import MAX_SENTENCES, MIN_SENTENCES, PLACEHOLDER_RE
 from schemas.base import RiskStatus
 from schemas.insight import InsightInput
 
-PROMPT_VERSION = "prompt-2026.11.13-v0.7"  # 상태 설명을 완결된 문장으로 전달하고 괄호 지침 보완
+PROMPT_VERSION = "prompt-2026.11.13-v0.8"  # LOW_GRADE의 합법적인 범위 미산출 구분
 SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encoding="utf-8").rstrip("\n")
 
 SCENARIOS = ("p80", "p100", "p120", "custom")  # 계약 ScenarioType을 소문자로 (#4 문서 5장)
@@ -110,12 +110,12 @@ def allowed_keys(inp: InsightInput) -> list[str]:
 
 
 def required_keys(inp: InsightInput) -> list[str]:
-    """권장량은 늘, 위험은 산출됐을 때, 범위는 정확도가 낮을 때 (#4 문서 4장, 고정본 required와 같음)."""
+    """권장량은 늘, 위험은 산출됐을 때, 범위는 LOW_GRADE에서 산출됐을 때 (#4 문서 4장)."""
     req = ["qty_p100"]
     if inp.risk_status == RiskStatus.OK:
         req += [k for k in ("risk_post_p100", "risk_pre") if k in inp.placeholders]
     elif inp.risk_status == RiskStatus.LOW_GRADE:
-        req += ["forecast_range_low", "forecast_range_high"]
+        req += [k for k in TAIL_KEYS if k in inp.placeholders]
     return req
 
 
@@ -163,12 +163,19 @@ def build_prompt(inp: InsightInput) -> Prompt:
     """상태 판정(정상 · 확인 필요 · 판단 보류)과 자리 표시자 목록으로 prompt를 만든다. 값은 넣지 않는다."""
     if "qty_p100" not in inp.placeholders:
         raise InsightInputError("권장량 자리 표시자(qty_p100)가 없어요. 정상(OK) 결과만 보낼 수 있어요")
+    ranges = set(TAIL_KEYS) & set(inp.placeholders)
+    if ranges and (inp.risk_status != RiskStatus.LOW_GRADE or ranges != set(TAIL_KEYS)):
+        raise InsightInputError("예상 출고량 범위는 LOW_GRADE에서 하한·상한이 함께 있어야 해요")
+    if inp.risk_status != RiskStatus.OK and any(
+        k.startswith(("risk_", "dir_risk_")) for k in inp.placeholders
+    ):
+        raise InsightInputError("위험 미산출 상태에는 위험 자리 표시자를 보낼 수 없어요")
     allowed = allowed_keys(inp)
     keys = set(allowed)
     risk = inp.risk_status == RiskStatus.OK
     status = "계산 상태: NORMAL"
     if inp.risk_status == RiskStatus.LOW_GRADE:
-        status += ", 위험 상태: LOW_GRADE (예측 정확도가 낮음. 품절 위험은 말하지 말고 예상 출고량 범위로만 설명)"
+        status += ", 위험 상태: LOW_GRADE (예측 정확도가 낮음. 품절 위험은 산출하지 않음)"
     lines = [f"상품: {inp.sku_label}", "", "[입력 — 시나리오 결과 구조]", status]
     if "method" in keys:
         reason = " (사유 있음 → {{method_reason}})" if "method_reason" in keys else ""
@@ -192,9 +199,13 @@ def build_prompt(inp: InsightInput) -> Prompt:
         if "risk_sample_size" in keys:
             lines.append("위험 기준: {{risk_basis}}, 표본 수 {{risk_sample_size}}")
     elif inp.risk_status == RiskStatus.LOW_GRADE:
-        lines.append("도착 전 품절 위험(공통): 예측 정확도가 낮아 품절 위험은 산출하지 않았습니다. "
-                     "대신 커버 기간 예상 출고량 범위 "
-                     "{{forecast_range_low}}~{{forecast_range_high}}")
+        if ranges:
+            lines.append("도착 전 품절 위험(공통): 예측 정확도가 낮아 품절 위험은 산출하지 않았습니다. "
+                         "대신 커버 기간 예상 출고량 범위 "
+                         "{{forecast_range_low}}~{{forecast_range_high}}")
+        else:
+            lines.append("예측 기록이 짧아 품절 위험은 산출하지 않았고, 예상 출고량 범위도 산출하지 않았습니다. "
+                         "이 사실을 완결된 문장으로 안내합니다. 범위나 확률을 만들지 않습니다.")
     else:
         lines.append("도착 전 품절 위험(공통): 과거 예측 표본이 부족해 산출하지 않았습니다.")
     scenarios = [x for x in SCENARIOS if f"qty_{x}" in keys]
