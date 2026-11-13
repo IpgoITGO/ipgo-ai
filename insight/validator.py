@@ -88,6 +88,18 @@ def _scenario_mismatches(text: str) -> list[str]:
     return bad
 
 
+def _balanced_parentheses(sentence: str) -> bool:
+    depth = 0
+    for char in sentence:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
 def check_draft(text: str, allowed: Iterable[str], required: Iterable[str] = ()) -> CheckResult:
     """문장 초안을 검사한다. allowed는 쓸 수 있는 자리 표시자, required는 꼭 써야 하는 자리 표시자."""
     v: list[Violation] = []
@@ -120,5 +132,7 @@ def check_draft(text: str, allowed: Iterable[str], required: Iterable[str] = ())
         v.append(Violation("format", f"문장 수 {n} (허용 {MIN_SENTENCES}~{MAX_SENTENCES})"))
     if "{" in body or "}" in body:
         v.append(Violation("format", "자리 표시자 형식이 아닌 중괄호"))
+    if any(not _balanced_parentheses(sentence) for sentence in SENTENCE_SPLIT.split(body)):
+        v.append(Violation("format", "문장 안에서 열고 닫는 괄호가 맞지 않음"))
 
     return CheckResult(v)

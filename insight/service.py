@@ -33,7 +33,7 @@ def generate_insight(inp: InsightInput, client: LLMClient) -> InsightResponse:
     try:
         r = client.complete(prompt.system, prompt.user)
     except LLMError as e:
-        logger.info("insight failed reason=%s latency_ms=%d prompt=%s", e.reason.value, e.latency_ms, PROMPT_VERSION)
+        logger.warning("insight failed reason=%s latency_ms=%d prompt=%s", e.reason.value, e.latency_ms, PROMPT_VERSION)
         return _failed(e.reason, e.latency_ms, None)
 
     text = None if r.truncated else draft_text(r.text)
@@ -41,9 +41,10 @@ def generate_insight(inp: InsightInput, client: LLMClient) -> InsightResponse:
     if text is not None:
         result = check_draft(text, prompt.allowed, prompt.required)
         detail = None if result.ok else result.violations[0].code
-    logger.info("insight %s detail=%s model=%s latency_ms=%d tokens=%s/%s cost_usd=%s prompt=%s",
-                "passed" if detail is None else "failed", detail, r.model, r.latency_ms,
-                r.input_tokens, r.output_tokens, r.cost_usd, PROMPT_VERSION)
+    log = logger.info if detail is None else logger.warning
+    log("insight %s detail=%s model=%s latency_ms=%d tokens=%s/%s cost_usd=%s prompt=%s",
+        "passed" if detail is None else "failed", detail, r.model, r.latency_ms,
+        r.input_tokens, r.output_tokens, r.cost_usd, PROMPT_VERSION)
     if detail is not None:
         return _failed(FailReason.VALIDATION_FAILED, r.latency_ms, r)
     return InsightResponse(validation=Validation.PASSED, draft=text, fail_reason=None,
