@@ -261,9 +261,74 @@ def preflight(env, service, read):
         data["services"][0]["status"] == "ACTIVE" and data["services"][0]["serviceName"] == name,
         "Target service is not active or has the wrong identity",
     )
+    if service == "ai" and env.get("COMPUTE_MODE") == "onebox":
+        check_onebox_ai_policy(env, data["services"][0], read)
     # Detect missing read permissions before ECR push or ECS changes.
     task_list(read, name)
     return {"read_preflight": "passed"}
+
+
+def check_onebox_ai_policy(env, current, read):
+    """Read the Infra #61 contract; policy changes belong to Infra, never this gate."""
+    message = "One-box AI policy mismatch; stop deployment and review Infra #61"
+    config = current.get("deploymentConfiguration") or {}
+    controller = current.get("deploymentController") or {}
+    require(isinstance(config, dict) and isinstance(controller, dict), message)
+    breaker = config.get("deploymentCircuitBreaker") or {}
+    require(isinstance(breaker, dict), message)
+    require(
+        current.get("launchType") == "EC2"
+        and controller.get("type") == "ECS"
+        and config.get("strategy") == "ROLLING"
+        and type(config.get("minimumHealthyPercent")) is int
+        and config["minimumHealthyPercent"] == 0
+        and config.get("maximumPercent") == 100
+        and breaker.get("enable") is True
+        and breaker.get("rollback") is True
+        and current.get("healthCheckGracePeriodSeconds") == 300,
+        message,
+    )
+    counts = [current.get(key) for key in ("desiredCount", "runningCount", "pendingCount")]
+    require(all(type(value) is int and 0 <= value <= 1 for value in counts), message)
+    require(counts[1] + counts[2] <= 1, message)
+    name = service_name(env, "ai")
+    arn = current["taskDefinition"]
+    require_template_arn(env, name, arn)
+    definition = read("ecs", "describe-task-definition", taskDefinition=arn)["taskDefinition"]
+    require(
+        definition.get("taskDefinitionArn") == arn and definition.get("family") == name,
+        "One-box AI task definition response mismatch",
+    )
+    platform = definition.get("runtimePlatform") or {}
+    require(isinstance(platform, dict), message)
+    containers = [c for c in definition.get("containerDefinitions", []) if c.get("name") == "ai-api"]
+    require(len(containers) == 1, message)
+    container = containers[0]
+    ports = container.get("portMappings") or []
+    require(isinstance(ports, list) and len(ports) == 1 and isinstance(ports[0], dict), message)
+    require(
+        definition.get("networkMode") == "bridge"
+        and definition.get("requiresCompatibilities") == ["EC2"]
+        and platform.get("cpuArchitecture") == "ARM64"
+        and platform.get("operatingSystemFamily") == "LINUX"
+        and definition.get("memory") == "256"
+        and container.get("memory") == 256
+        and ports[0].get("containerPort") == 8000
+        and ports[0].get("hostPort") == 18000
+        and ports[0].get("protocol") == "tcp",
+        message,
+    )
+    response = read("ecs", "describe-services", cluster=CLUSTER, services=["ipgo-dev-ai-worker"])
+    require(not response.get("failures") and len(response["services"]) == 1, message)
+    worker = response["services"][0]
+    require(worker.get("serviceName") == "ipgo-dev-ai-worker" and worker.get("status") == "ACTIVE", message)
+    require(
+        all(
+            type(worker.get(key)) is int and worker[key] == 0
+            for key in ("desiredCount", "runningCount", "pendingCount")
+        ),
+        message,
+    )
 
 
 def service_name(env, service):

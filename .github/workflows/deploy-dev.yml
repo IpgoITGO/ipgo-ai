@@ -174,15 +174,6 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           role-session-name: ipgo-ai-deploy
-      - name: Check separate worker is stopped
-        if: env.COMPUTE_MODE == 'onebox' && inputs.engine_mode == 'real'
-        run: |
-          counts="$(aws ecs describe-services --cluster ipgo-dev-cluster \
-            --services ipgo-dev-ai-worker --query 'services[0].[desiredCount,runningCount,pendingCount]' --output text)"
-          if [[ "$counts" != $'0\t0\t0' ]]; then
-            echo '::error::The separate worker service must exist and be fully stopped before real one-box deployment.'
-            exit 1
-          fi
       - name: Verify AWS read prerequisites before deployment writes
         timeout-minutes: 2
         env:
@@ -281,14 +272,10 @@ jobs:
       - name: Verify active template revisions before ECS writes
         timeout-minutes: 2
         run: python3 "$RUNNER_TEMP/verify_deployment.py" check-template --service ai
-      - name: Configure approved one-box restart
+      - name: Verify Infra policy immediately before ECS writes
         if: env.COMPUTE_MODE == 'onebox'
-        run: |
-          aws ecs update-service \
-            --cluster ipgo-dev-cluster \
-            --service "$ECS_SERVICE_NAME" \
-            --deployment-configuration 'minimumHealthyPercent=0,maximumPercent=100' \
-            >/dev/null
+        timeout-minutes: 2
+        run: python3 "$RUNNER_TEMP/verify_deployment.py" preflight --service ai
       - name: Deploy API task definition
         id: deploy-app
         uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b

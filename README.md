@@ -242,11 +242,27 @@ view는 회원별 RLS를 대신하지 않습니다. repository가 회원·창고
 업무 table 직접 조회·DML·DDL·migration 권한을 주지 않습니다.
 
 단일 호스트 개발 환경에서 `AWS_DEV_COMPUTE_MODE=onebox`는 ARM 이미지와
-`ipgo-dev-onebox-ai-api` 서비스를 선택합니다. 검증한 구성은 mock API 최대 1개와 worker 0개이며,
-real 모드와 worker는 해당 코드의 메모리·부하를 별도로 검증해야 합니다. 기존 조회 전용 DB·IAM 역할은 유지합니다.
+`ipgo-dev-onebox-ai-api` 서비스를 선택합니다. API는 최대 1개·독립 worker는 0개이며,
+real 모드에서는 API 안의 내장 worker 1개와 해당 코드의 메모리·부하 승인이 필요합니다.
+기존 조회 전용 DB·IAM 역할은 유지합니다.
 이후 배포에는 AI 서비스의 짧은 재시작이 필요하므로 검토 후 workflow의 `maintenance_approved`를 선택합니다.
 서버 이전은 현재 배포 코드로 진행하며 최신 dev·실계산 기능을 자동으로 배포하지 않습니다.
 [인프라 운영 문서](https://github.com/IpgoITGO/ipgo-infra/blob/dev/docs/onebox.md)에서 비용·알림·복구 절차를 확인할 수 있습니다.
+
+공유 호스트 배포 정책의 정본은
+[Infra #61 정책 문서](https://github.com/IpgoITGO/ipgo-infra/blob/dev/docs/onebox.md#공유-호스트-ai-배포-정책)이며,
+[Infra PR #62](https://github.com/IpgoITGO/ipgo-infra/pull/62)의 병합 커밋은 `624add2`입니다.
+[AI #105](https://github.com/IpgoITGO/ipgo-ai/issues/105)는 이 계약을 읽기 전용으로 검증합니다.
+이미지 쓰기 전과 최초 ECS 쓰기 직전의 `preflight`에서 대상 계정·서비스, ECS/ROLLING·`0/100`,
+circuit breaker/rollback 활성·health 유예 300초, EC2·ARM64·bridge·256MiB·고정 host port 18000,
+API 수량 최대 1개와 독립 worker의 목표·실행·대기 0을 확인합니다.
+누락·조회 실패·불일치면 배포를 중단하고 Infra에서 원인과 승인 범위를 확인합니다.
+AI workflow는 배포 정책을 자동 변경하지 않으며, 승인 SHA·maintenance·capacity·LLM 승인과
+이미지·active template·rollout·앱 health 검사를 유지합니다. legacy 경로에는 onebox 정책을 적용하지 않습니다.
+
+정책의 실제 일치 근거는 Infra 문서의 2026-11-13 11:00 KST 읽기 관측입니다.
+이 변경의 로컬 회귀검사는 합성 AWS 응답을 사용하며 실제 배포·실부하·사용자 업무·LLM 응답 검증이 아닙니다.
+실제 설정은 다음 승인된 배포에서 다시 확인하고, 정책 불일치를 해결하려고 재배포를 반복하지 않습니다.
 
 - Spring Boot가 업무 DB와 상태 변경을 소유합니다. FastAPI는 승인된 계산용 view와 필요한 table을
   `SELECT`만 하며 migration과 데이터 변경을 하지 않습니다.
