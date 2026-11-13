@@ -77,7 +77,7 @@ def test_low_sample_prompt_uses_complete_sentence_and_closed_note():
     assert "괄호는 같은 문장 안에서 열고 닫습니다." in prompt.user
     assert "문장 조각으로 복사하지 말고 완결된 존댓말" in prompt.user
     assert "현재 재고 {{start_stock}}개는 기준일 {{as_of_date}} 이후 출고를 예측한 추정값)" in prompt.user
-    assert PROMPT_VERSION == "prompt-2026.11.13-v0.7"
+    assert PROMPT_VERSION == "prompt-2026.11.13-v0.8"
 
 
 def test_fluent_low_sample_draft_keeps_metadata_and_calls_once():

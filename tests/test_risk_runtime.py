@@ -330,7 +330,8 @@ def test_custom_http_reuses_same_policy_and_low_grade_is_suppressed(client, conf
     assert response.json()["postArrivalRisk"] == result["scenarios"][1]["postArrivalRisk"]
     frame = daily_rows(101, ASOF, 4, 12)
     low = client.post("/engine/calculate", json=request.to_json_dict()).json()["results"][0]
-    assert low["riskStatus"] == "LOW_GRADE" and low["preArrivalRisk"] is None and low["insightInput"] is None
+    assert low["riskStatus"] == "LOW_GRADE" and low["preArrivalRisk"] is None
+    assert low["insightInput"]["riskStatus"] == "LOW_GRADE"
     assert client.post("/engine/scenarios", json=custom.to_json_dict()).json()["postArrivalRisk"] is None
 
 
