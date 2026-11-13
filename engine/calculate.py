@@ -168,6 +168,8 @@ def _apply_risk(
     if context is None or result.status not in (ResultStatus.OK, ResultStatus.NOT_NEEDED):
         return
     gap = (request.today - request.as_of_date).days
+    if gap + result.horizon_days in context.unavailable_horizons:
+        return
     choose = selector.select if selector is not None else lambda **kwargs: select_risk_samples(context, **kwargs)
     selection = choose(
         product_id=result.product_id, method=result.method,
@@ -206,6 +208,8 @@ def _apply_accuracy(result, request, settings, context, indexed, selector=None):
     """동일 산식·H의 확정 TUNE 커버 실적과 D 비율의 LOW 범위를 연결한다(개·비율)."""
     if result.status not in (ResultStatus.OK, ResultStatus.NOT_NEEDED) or context is None:
         return
+    if result.horizon_days in context.unavailable_horizons:
+        return
     from engine.evaluation import accuracy_for, case_from_sample
     samples = [s for b in context.batches for s in b.samples
                if s.product_id == result.product_id and s.method == result.method
@@ -219,7 +223,8 @@ def _apply_accuracy(result, request, settings, context, indexed, selector=None):
     result.cover_success_count = accuracy.cover_success_count
     result.cover_trial_count = accuracy.cover_trial_count
     result.forecast_error_rate = accuracy.forecast_error_rate
-    if result.accuracy_grade is not None and result.accuracy_grade.value == "LOW":
+    if (result.accuracy_grade is not None and result.accuracy_grade.value == "LOW"
+            and (request.today-request.as_of_date).days + result.horizon_days not in context.unavailable_horizons):
         choose = selector.select if selector is not None else lambda **kwargs: select_risk_samples(context, **kwargs)
         selection = choose(product_id=result.product_id, method=result.method,
             horizon_days=(request.today-request.as_of_date).days + result.horizon_days,

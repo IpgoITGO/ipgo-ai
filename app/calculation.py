@@ -23,11 +23,14 @@ def calculate(request: CalculateRequest, daily: pd.DataFrame) -> CalculateRespon
         _, source_daily, _ = core._inputs(request, daily)
         digest = source_digest(source_daily)
         for result in response.results:
-            evaluated = context is not None and result.status.value in ("OK", "NOT_NEEDED")
+            capacity_exceeded = context is not None and result.horizon_days in context.unavailable_horizons
+            evaluated = (context is not None and not capacity_exceeded
+                         and result.status.value in ("OK", "NOT_NEEDED"))
             history = sorted(result.accuracy_history, key=lambda point: point.origin_date)
             result.accuracy_evaluation = AccuracyEvaluation(
                 status="AVAILABLE" if history else "EMPTY" if evaluated else "UNAVAILABLE",
-                reason=None if history else "NO_VALID_SAMPLES" if evaluated else "EVALUATION_UNAVAILABLE",
+                reason=(None if history else "EVALUATION_CAPACITY_EXCEEDED" if capacity_exceeded
+                        else "NO_VALID_SAMPLES" if evaluated else "EVALUATION_UNAVAILABLE"),
                 period_start=context.period_start if context else None,
                 period_end=context.period_end if context else None,
                 observed_through=request.as_of_date, horizon_days=result.horizon_days,
