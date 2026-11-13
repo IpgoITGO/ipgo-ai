@@ -148,8 +148,19 @@ worker는 `ENGINE_MODE`와 관계없이 실제 엔진을 호출합니다. `IPGO_
 API에 worker thread를 띄우고 두 SQS queue URL이 필요합니다. `/health`의 mode는 HTTP 설정을 뜻하며,
 embedded worker가 비정상 종료되면 health가 503입니다. worker는 결과 발행 후 메시지를 삭제하므로
 발행 또는 삭제 실패 시 중복 결과가 가능하고 Spring은 job ID로 중복을 처리해야 합니다. SQS 수신 오류는
-짧게 기다린 후 재시도합니다. 가시성 timeout은 900초이며 자동 갱신하지 않습니다. 결과가 900,000바이트를
+짧게 기다린 후 재시도합니다. 가시성 timeout은 수신 요청에서 지정하지 않고 Infra가 관리하는 jobs 큐
+기본값을 사용하며 자동 갱신하지 않습니다. 결과가 900,000바이트를
 넘으면 `RESULT_TOO_LARGE`로 실패합니다.
+
+선행 정책은 [Infra #65 / PR #66](https://github.com/IpgoITGO/ipgo-infra/pull/66)의
+[SQS 소비 계약](https://github.com/IpgoITGO/ipgo-infra/blob/aa4aa8a4c3ba24c702d84df5edd0f0a487012aaa/docs/onebox.md#sqs-visibility-timeout-정책)입니다.
+2026-11-13 13:23 KST 개발 jobs 큐의 읽기 관측값은 900초이며, Infra가 AI #107 적용 검증까지 유지합니다.
+배포 직전 실제 기본값·진행 작업·승인 SHA/이미지·복구 대상을 다시 확인합니다. 불일치·조회 실패 시
+AI가 큐 속성을 자동 보정하지 않고 Infra에서 원인·영향·복구를 검토한 뒤 필요한 변경을 별도 승인받습니다.
+worker에 큐 속성 조회·변경 권한을 추가하지 않습니다. 기본값이 짧아지면 긴 작업의 중복 처리,
+길어지면 실패 작업 재전달 지연에 영향을 줍니다. timeout을 넘는 작업의 중복 가능성은 남습니다.
+복구는 실행 직전 검증한 이전 이미지/태스크 정의를 사용하며, 이전 코드가 900초를 강제한다는 점을
+확인합니다. 이번 구현·CI 검증은 실제 배포나 메시지 처리·장기 안정성 검증을 뜻하지 않습니다.
 
 256 MiB 격리 로컬 컨테이너의 합성 31상품·31일 테스트에서 같은 프로세스의 정제는 0.32초,
 계산은 0.25초, cgroup peak는 약 155 MiB였습니다. OOM 및 재시작은 없었습니다. 이는 단일
