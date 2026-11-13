@@ -27,6 +27,9 @@ real engineVersion은0.6.0입니다. mock 응답은 기존 계약의 정적 예�
 
 Python 3.14가 필요합니다.
 
+DA-01 로컬 Server·worker 연동은 [로컬 worker 실행 안내](docs/local-worker.md)를 따릅니다.
+시험용 설정 예시와 오프라인 검증을 제공하며, 실제 DB·브로커 구축과 Server 저장 검증은 별도입니다.
+
 ```bash
 python3.14 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
