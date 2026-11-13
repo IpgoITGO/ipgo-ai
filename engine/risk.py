@@ -22,12 +22,17 @@ class RiskContext:
     min_samples: int
     policy_version: str | None = None
     policy_hash: str | None = None
+    # 계산량 보호 한도로 생성하지 않은 길이. 실제 표본 부족과 구분한다.
+    unavailable_horizons: tuple[int, ...] = ()
 
     def __post_init__(self):
         if (type(self.period_start) is not date or type(self.period_end) is not date
                 or self.period_start != date(self.period_start.year, 5, 1)
                 or self.period_end != date(self.period_start.year, 7, 31)
                 or type(self.min_samples) is not int or self.min_samples < 1
+                or not isinstance(self.unavailable_horizons, tuple)
+                or any(type(h) is not int or h < 1 for h in self.unavailable_horizons)
+                or self.unavailable_horizons != tuple(sorted(set(self.unavailable_horizons)))
                 or not isinstance(self.batches, tuple)
                 or any(not isinstance(b, ErrorSampleBatch) or not isinstance(b.samples, tuple)
                        or any(not isinstance(s, ErrorSample) for s in b.samples) for b in self.batches)):

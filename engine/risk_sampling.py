@@ -41,7 +41,9 @@ def prepare_risk_context(
 ) -> RiskContext | None:
     """동일 source·기준일 이하 자료로 D=g+H별 TUNE batch를 요청마다 만든다.
 
-    예측 호출 상한 = SKU 수 × 성숙한 기준일 수 × A/B2개를 D별 합산한 값이다.
+    예측 호출 수(회) = SKU 수 × 성숙한 기준일 수 × A/B2개를 H/D별 합산한 값이다.
+    D를 먼저, 같은 우선순위에서는 호출 수·길이 오름차순으로 완전한 pool만 생성한다.
+    상한에 들어오지 않는 길이는 unavailable_horizons에 남기며 표본 일부를 잘라 쓰지 않는다.
     정책 확정 이전 snapshot에는 미래에 고정된 정책을 소급 적용하지 않는다.
     pool은 productIds에 제한하지 않으며 회원·창고 소유권 검증은 app/repository가 먼저 수행한다.
     """
@@ -50,8 +52,9 @@ def prepare_risk_context(
         return None
     gap = (request.today - request.as_of_date).days
     # DA13 커버 실적은 H, DA07 위험/LOW 범위는 D=g+H. 같은 H는 한 번만 생성한다.
-    horizons = sorted({extra + settings[p].lead_time_days + settings[p].review_cycle_days
-                       for p in ids if p in settings for extra in {0, gap}})
+    covers = {settings[p].lead_time_days + settings[p].review_cycle_days for p in ids if p in settings}
+    risk_horizons = {gap + horizon for horizon in covers}
+    horizons = sorted(covers | risk_horizons)
     cutoff = min(request.as_of_date, policy.period_end)
     # 조정 구간에 실적 행이 전혀 없는 작년 전용 SKU는 유효 비율을 만들 수 없다.
     # productIds로 pool을 줄이지 않으며, 기준일 이후 처음 나타난 상품도 넣지 않는다.
@@ -65,14 +68,20 @@ def prepare_risk_context(
             origins_by_horizon[horizon] = tuple(o for o in policy.origins if o + timedelta(days=horizon) <= cutoff)
         except OverflowError as exc:
             raise CalculationInputError("위험 평가 기간이 날짜 범위를 넘어요") from exc
-    calls = len(tune_ids) * 2 * sum(len(origins) for origins in origins_by_horizon.values())
-    if calls > MAX_RISK_FORECASTS:
-        raise CalculationInputError("위험 표본 생성의 요청당 계산 지원 범위를 초과했어요")
+    costs = {h: len(tune_ids) * 2 * len(origins) for h, origins in origins_by_horizon.items()}
+    remaining = MAX_RISK_FORECASTS
+    unavailable = []
+    for horizon in sorted(horizons, key=lambda h: (h not in risk_horizons, costs[h], h)):
+        if costs[horizon] > remaining:
+            unavailable.append(horizon)
+        else:
+            remaining -= costs[horizon]
     try:
         plans = [dict(origins=origins, horizon_days=horizon,
                       period=Period(start=policy.period_start, end=policy.period_end),
                       period_name=SamplePeriod.TUNE, observed_through=request.as_of_date, product_ids=tune_ids)
-                 for horizon, origins in origins_by_horizon.items() if origins and tune_ids]
+                 for horizon, origins in origins_by_horizon.items()
+                 if horizon not in unavailable and origins and tune_ids]
         batches = generate_error_sample_batches(daily, plans)
     except (BacktestInputError, RiskInputError) as exc:
         raise CalculationInputError("위험 표본의 원본·기간·산식 입력을 확인해 주세요") from exc
@@ -81,4 +90,4 @@ def prepare_risk_context(
         origins=[d.isoformat() for d in policy.origins], minSamples=policy.min_samples),
         sort_keys=True, separators=(",", ":"))
     return RiskContext(tuple(batches), policy.period_start, policy.period_end, policy.min_samples,
-                       policy.version, hashlib.sha256(policy_json.encode()).hexdigest())
+                       policy.version, hashlib.sha256(policy_json.encode()).hexdigest(), tuple(sorted(unavailable)))
