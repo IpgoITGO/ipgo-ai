@@ -1,0 +1,27 @@
+# ARM 실행기를 설치하지 않고 native builder에서 ARM wheel/공유 라이브러리를 준비한다.
+FROM --platform=$BUILDPLATFORM python:3.14-slim AS packages
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+COPY requirements.txt /build/requirements.txt
+COPY requirements /build/requirements
+WORKDIR /build
+RUN python -m pip install --only-binary=:all: \
+    --platform manylinux_2_34_aarch64 --platform manylinux_2_28_aarch64 \
+    --platform manylinux2014_aarch64 --target /arm-site -r requirements.txt
+RUN dpkg --add-architecture arm64 && apt-get update \
+    && mkdir -p /arm-libs /debs && cd /debs \
+    && apt-get download libgomp1:arm64 libstdc++6:arm64 libgcc-s1:arm64 \
+    && for file in *.deb; do dpkg-deb -x "$file" /arm-libs; done
+
+FROM python:3.14-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 IPGO_MODEL19_DIR=/opt/ipgo-model19
+COPY --from=packages /arm-site/ /usr/local/lib/python3.14/site-packages/
+COPY --from=packages /arm-libs/ /
+WORKDIR /app
+COPY --chown=10001:10001 app app
+COPY --chown=10001:10001 engine engine
+COPY --chown=10001:10001 insight insight
+COPY --chown=10001:10001 schemas schemas
+COPY --chown=10001:10001 model_assets/ /opt/ipgo-model19/
+USER 10001:10001
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

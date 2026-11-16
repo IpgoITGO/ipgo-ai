@@ -40,7 +40,7 @@ def errors(samples):
 def choose_method(samples):
     """동일 SKU·기준일·H의 A/B만 비교한다. A WAPE≤.9×B이면 A, 나머지는 B."""
     by_method = {m: {(s.product_id, s.origin_date, s.horizon_days): s for s in samples if s.method == m}
-                 for m in Method}
+                 for m in (Method.A, Method.B)}
     common = by_method[Method.A].keys() & by_method[Method.B].keys()
     a = errors([by_method[Method.A][k] for k in common])[1]
     b = errors([by_method[Method.B][k] for k in common])[1]
@@ -326,7 +326,7 @@ def _evaluate(request, daily):
         target_met=bool(selected and selected.meets_target),
         method_errors=[MethodError(period=phase.value, method=m, mae=errors(ss)[0], wape=errors(ss)[1],
                                    sample_size=len(ss))
-                       for phase in SamplePeriod for m in Method
+                       for phase in SamplePeriod for m in (Method.A, Method.B)
                        for ss in [[s for s in samples if s.period == phase and s.method == m]]],
         multiplier_metrics=metrics, actual_inbound_comparison=inbound,
         scenario_reliability=ScenarioReliability(ending_stock_mae=math.fsum(ending_errors)/len(ending_errors)

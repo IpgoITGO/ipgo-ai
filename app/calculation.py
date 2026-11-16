@@ -6,19 +6,35 @@ from app.source_digest import source_digest
 from engine import calculate as core
 from engine.risk_sampling import prepare_risk_context
 from engine.scenario import RiskInputError
+from schemas.base import Method
 from schemas.engine import AccuracyEvaluation, CalculateRequest, CalculateResponse, ScenarioRequest, ScenarioResult
 
 
 def _context(request: CalculateRequest, daily: pd.DataFrame):
+    if request.policy.default_method is Method.LGBM19:
+        return None
     policy = load_risk_policy()
     return prepare_risk_context(request, daily, policy) if policy is not None else None
+
+
+def _model_bundle(request):
+    if request.policy.default_method is not Method.LGBM19:
+        return None
+    from app.config import get_settings
+    from engine.model19 import Model19Error, load_bundle
+    try:
+        return load_bundle(get_settings().model19_directory, request.policy.model_version or "")
+    except Model19Error as exc:
+        raise core.CalculationInputError(str(exc)) from exc
 
 
 def calculate(request: CalculateRequest, daily: pd.DataFrame) -> CalculateResponse:
     """업로드 snapshot의 TUNE 표본을 준비해 DA07과 기존 수량 계산에 연결한다."""
     try:
         context = _context(request, daily)
-        response = core.calculate(request, daily, risk_context=context)
+        response = core.calculate(request, daily, risk_context=context, model_bundle=_model_bundle(request))
+        if request.policy.default_method is Method.LGBM19:
+            response.engine_version += "+lgbm19"
         # 선택 source·기준일 범위와 v1 지문 계약은 유지한다.
         _, source_daily, _ = core._inputs(request, daily)
         digest = source_digest(source_daily)
@@ -46,6 +62,7 @@ def custom_scenario(request: ScenarioRequest, daily: pd.DataFrame) -> ScenarioRe
     """계산과 동일 정책·source·기간으로 직접 입력 시나리오 위험을 재계산한다."""
     try:
         context = _context(request.calculation_input, daily)
-        return core.custom_scenario(request, daily, risk_context=context)
+        return core.custom_scenario(
+            request, daily, risk_context=context, model_bundle=_model_bundle(request.calculation_input))
     except RiskInputError as exc:
         raise core.CalculationInputError("위험 계산 입력을 확인해 주세요") from exc

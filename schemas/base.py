@@ -45,6 +45,7 @@ class ResultStatus(StrEnum):
 class Method(StrEnum):
     A = "A"  # 작년 동일 커버 기간 × 직전 90일 추세
     B = "B"  # 최근 유효 관측일 평균 × 커버 기간
+    LGBM19 = "LGBM19"  # 고정19일·BUFFER100_FLOOR0
 
 
 class RiskStatus(StrEnum):

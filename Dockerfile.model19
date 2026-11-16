@@ -1,0 +1,5 @@
+# 비공개 bundle은 로컬/승인된 비공개 빌드 컨텍스트에만 둔다.
+ARG BASE_IMAGE=ipgo-ai:model19-base
+FROM ${BASE_IMAGE}
+COPY --chown=ipgo:ipgo model_assets/ /opt/ipgo-model19/
+ENV IPGO_MODEL19_DIR=/opt/ipgo-model19
