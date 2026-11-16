@@ -235,6 +235,8 @@ jobs:
         run: |
           docker pull "$MODEL_IMAGE" >/dev/null 2>&1
           docker run --rm --network none --read-only --tmpfs /tmp:size=16m \
+            --memory=256m --cpus=0.5 "$MODEL_IMAGE" uvicorn --version
+          docker run --rm --network none --read-only --tmpfs /tmp:size=16m \
             --memory=256m --cpus=0.5 -e MODEL19_VERSION "$MODEL_IMAGE" \
             python -c 'import os; from engine.model19 import load_bundle; load_bundle("/opt/ipgo-model19", os.environ["MODEL19_VERSION"]); print("model19 bundle verified")'
       - name: Capture active service task definitions

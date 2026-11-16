@@ -42,3 +42,6 @@ def test_workflow_checks_model_before_build_and_task_changes():
     assert names.index("Require prebuilt model19 image") < names.index("Build and push immutable image")
     assert names.index("Verify private model bundle") < names.index("Capture active service task definitions")
     assert names.index("Configure model19 path") < names.index("Render API task definition")
+    checks = steps[names.index("Verify private model bundle")]["run"]
+    assert '"$MODEL_IMAGE" uvicorn --version' in checks
+    assert checks.index("uvicorn --version") < checks.index("load_bundle")
