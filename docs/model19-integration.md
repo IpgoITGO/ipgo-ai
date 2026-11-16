@@ -24,6 +24,11 @@ HTTP calculate, SQS CALCULATE, CUSTOM은 같은 bundle을 사용한다. 검증�
 
 개발 대상 ARM64는 Dockerfile.model19.arm64로 ARM wheel/공유 라이브러리를 native builder에서 준비해 cross-build한다. 호스트의 binfmt나 시스템 패키지를 바꿀 필요가 없다. ARM 이미지의 모델/API는 private QEMU user-mode에서도 검증했지만 이는 네이티브 ARM 성능 검증이 아니다.
 
+`pip --target`의 console script는 site-packages 복사만으로 PATH에 들어가지 않는다.
+ARM 이미지에는 `uvicorn` 실행 파일을 `/usr/local/bin`에도 복사해 기존 ECS command와 호환한다.
+개발 workflow는 실제 사전 빌드 이미지를 native ARM runner에서 `uvicorn --version`으로 실행하고
+모델 버전/해시 검사까지 통과한 뒤에만 ECS를 변경한다. Dockerfile CMD 검사만으로 대체하지 않는다.
+
 기존 dev workflow의 model19_enabled 기본은 false다. true일 때는 engine_mode=real, 올바른 model19_version, 기존 immutable SHA 이미지가 필수이며 없으면 기본 Dockerfile로 대체하지 않고 중단한다. ECR에서 검증한 이미지로 모델 버전/해시를 native runner에서 검사한 뒤에만 task snapshot/path를 렌더링한다. 비공개 모델 이미지의 ECR push와 실제 workflow 실행은 별도 승인을 받는다. 이미지 태그는 최종 승인된 dev SHA/아키텍처 규칙을 따르며 로컬 feature SHA를 임의로 대체하지 않는다.
 
 AWS 리소스/권한/Secret 생성은 필요하지 않은 것으로 설계했다. 이미지 push·실제 task 등록·환경변수 변경·서비스 갱신은 실행하지 않는다. 배포 전 실제 메모리/큐 처리/컨테이너 입력 크기와 정확한 SHA·이미지 digest를 확인한다.
