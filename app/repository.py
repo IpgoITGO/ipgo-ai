@@ -110,15 +110,19 @@ def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,
                                 if dates_seen[key, received] == stock_date:
                                     raise CleaningInputError("직전 월 재고 날짜가 중복되었어요")
                                 continue
-                            if stock_date != prior_end or not key or not isinstance(received, date):
-                                raise CleaningInputError("직전 월 재고 날짜가 월말과 일치하지 않아요")
+                            if not key or not isinstance(received, date):
+                                raise CleaningInputError("직전 월 재고관리단위가 올바르지 않아요")
+                            if not isinstance(stock_date, date) or not prior_start <= stock_date <= prior_end:
+                                raise CleaningInputError("직전 월 재고 날짜가 직전 월 기간을 벗어났어요")
                             if isinstance(qty, Decimal):
                                 if not qty.is_finite() or qty != qty.to_integral_value():
                                     raise CleaningInputError("직전 월 재고 수량이 올바르지 않아요")
                                 qty = int(qty)
                             if isinstance(qty, bool) or not isinstance(qty, int) or not 0 <= qty <= MAX_QTY:
                                 raise CleaningInputError("직전 월 재고 수량이 올바르지 않아요")
-                            previous[key, received] = qty
+                            # 정제는 소진 뒤 빈칸인 날의 기록을 만들지 않는다(빈칸 = 0).
+                            # 월말 전에 기록이 끝난 단위의 월말 재고는 0개로 이어 붙인다.
+                            previous[key, received] = qty if stock_date == prior_end else 0
                             dates_seen[key, received] = stock_date
                         if not previous:
                             raise CleaningInputError("직전 월 재고 기록이 없어 연결할 수 없어요")
