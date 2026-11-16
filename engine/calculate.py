@@ -278,6 +278,8 @@ def calculate(
     model_bundle=None,
 ) -> CalculateResponse:
     """D=g+H일 예측에서 H일 필요량(개)을 구하고, 권장량의 80/100/120%를 입고 단위로 올려 비교한다."""
+    if request.policy.default_method is Method.LGBM19:
+        risk_context = None  # #120: 직접 호출에서도 A/B 평가 표본을 새 모델에 적용하지 않는다.
     settings, daily, ids = _inputs(request, product_daily)
     results = []
     indexed = {}
@@ -319,6 +321,8 @@ def custom_scenario(
 ) -> ScenarioResult:
     """한 상품의 같은 입력 snapshot으로 재계산하고, 직접 입력한 수량(개)을 그대로 시뮬레이션한다."""
     ci = request.calculation_input
+    if ci.policy.default_method is Method.LGBM19:
+        risk_context = None
     settings, daily, ids = _inputs(ci, product_daily)
     if len(ids) != 1:
         raise CalculationInputError("직접 입력 시나리오는 상품 1개의 계산 입력이 필요해요")
