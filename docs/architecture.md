@@ -1,5 +1,13 @@
 # 구조와 연동
 
+## 수불부 입력 형식
+
+수불부 업로드는 **XLSX(.xlsx)만 받습니다**. PDF·이미지·HWP 추가 지원은 진행하지 않습니다.
+2026-11-16 팀 합의로 [서버 #229 / IPGO-100](https://github.com/IpgoITGO/ipgo-server/issues/229)과
+[화면 #89 / IPGO-38](https://github.com/IpgoITGO/ipgo-client/issues/89)은 범위 제외로 종료했습니다.
+과거 PDF 우선 검토·비XLSX 보류 계획은 남은 작업에 포함하지 않습니다.
+정제 작업은 기존 XLSX reader와 공통 검증 흐름을 사용하며 PDF 추출·OCR·HWP 파서를 추가하지 않습니다.
+
 ## 호출 흐름
 
 ```mermaid
