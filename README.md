@@ -395,6 +395,12 @@ Spring의 BACKTEST job 생성·저장은 아직 별도이며 이 단계는 AI HT
 관련 회귀 검사는 `pytest -q tests/test_insight_evaluation.py tests/test_judge.py`로 실행합니다.
 가짜 응답을 이용한 오프라인 검사이며 실제 LLM 품질·사용자 업무 효과를 검증한 결과는 아닙니다.
 
+LGBM19는 위험/정확도와 함께 LLM·기본 문장을 계속 미생성으로 유지합니다(#122).
+오프라인 평가에서도 A/B 산식 문장을 대신 만들지 않으며 비교표는 고정19일 LightGBM과
+위험 미산출을 표시합니다. 미산출 사유를 표본 부족으로 추측하지 않습니다.
+`pytest -q tests/test_model19_insight.py`는 합성 모델 결과로 이 경계를 검증합니다.
+실제 LLM 호출이나 prompt 변경은 포함하지 않습니다.
+
 ## 개발 배포의 동일 SHA 이미지 재사용
 
 `deploy-dev.yml`은 AWS 인증/기존 승인 검사 이후, 배포 역할의 기존 `ecr:BatchGetImage` 권한으로

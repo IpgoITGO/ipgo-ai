@@ -18,6 +18,11 @@ model_assets는 공개 Git에 넣지 않는다. q50/q80/q90·metadata·product-m
 
 HTTP calculate, SQS CALCULATE, CUSTOM은 같은 bundle을 사용한다. 검증되지 않은 A/B용 DA07·DA13을 붙이지 않고 위험/정확도/인사이트를 미산출로 반환한다. modelVersion·targetStockQty·modelFallback으로 실행 근거를 전달하고 engineVersion에는 +lgbm19를 붙인다. 모델 P80/P90와 주문량80/100/120% 시나리오는 별개다.
 
+2026-11-17 #122 사용자 결정: 설명 미생성을 유지한다. 시험용 기본 문장과 오프라인 평가도
+LGBM19 결과에 A/B 산식·배수 문장을 붙이지 않고 LLM을 호출하지 않는다. 비교표의 위험은
+미산출이며 표본 부족으로 단정하지 않는다. prompt·InsightResponse·Spring/Client 계약은
+변경하지 않는다. 모델 근거 문장의 활성화·실제 LLM 품질 측정은 별도 후속 결정 대상이다.
+
 ## 비공개 이미지 준비
 
 기본 Dockerfile은 libgomp1과 고정 라이브러리를 설치한다. 기본 이미지 빌드 후 Dockerfile.model19가 Git에서 제외된 model_assets를 /opt/ipgo-model19에 복사한다. 로컬 이미지에도 실제 모델이 포함되므로 승인 없이 공개 registry로 push/export하지 않는다. model_assets를 제거한 CI 기본 빌드도 유지한다.

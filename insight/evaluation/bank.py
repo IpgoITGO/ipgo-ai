@@ -24,7 +24,7 @@ from insight.llm import LLMClient, LLMResult
 from insight.prompt import PROMPT_VERSION, build_prompt, draft_text
 from insight.service import generate_insight
 from insight.validator import check_draft
-from schemas.base import ResultStatus, RiskStatus
+from schemas.base import Method, ResultStatus, RiskStatus
 from schemas.insight import Validation
 from tests.insight_fallback import PLACEHOLDER_RE, build_fallback
 
@@ -108,6 +108,9 @@ def generate(case: EvalCase, client: LLMClient) -> GenResult:
             versions=versions | {"model": last.model if last else None},
         )
 
+    if r.method == Method.LGBM19:
+        return done("none", reason="model_explanation_deferred",
+                    detail="LGBM19 설명 미생성 (#122): LLM·기본 문장을 만들지 않음")
     if r.status != ResultStatus.OK:
         return done("fixed", detail=f"상태 {r.status.value}: Spring이 FastAPI를 부르지 않음")
     inp = to_input(case)
@@ -147,6 +150,8 @@ def for_experiment(c: EvalCase) -> EvalCase:
 
 def experiment_candidate(c: EvalCase) -> tuple[bool, str]:
     r = c.result
+    if r.method == Method.LGBM19:
+        return False, "LGBM19 설명 미생성 (#122)"
     if r.status != ResultStatus.OK:
         return False, f"상태 {r.status.value}"
     if any(c.scenario(k) is None for k in EXPERIMENT_KEYS):
