@@ -18,6 +18,11 @@ model_assets는 공개 Git에 넣지 않는다. q50/q80/q90·metadata·product-m
 
 HTTP calculate, SQS CALCULATE, CUSTOM은 같은 bundle을 사용한다. 검증되지 않은 A/B용 DA07·DA13을 붙이지 않고 위험/정확도/인사이트를 미산출로 반환한다. modelVersion·targetStockQty·modelFallback으로 실행 근거를 전달하고 engineVersion에는 +lgbm19를 붙인다. 모델 P80/P90와 주문량80/100/120% 시나리오는 별개다.
 
+순수 엔진 calculate/CUSTOM을 직접 호출할 때 A/B risk_context를 전달해도 LGBM19에서는
+사용하지 않는다(#120). 같은 상품·기간의 기존 표본도 새 모델용 표본이 아니며, 모델 평가
+미산출을 INSUFFICIENT_SAMPLE로 바꾸지 않는다. HTTP/worker의 평가 정책 로딩 차단과 함께
+`tests/test_model19_evaluation_isolation.py`에서 합성 표본으로 검증한다.
+
 2026-11-17 #122 사용자 결정: 설명 미생성을 유지한다. 시험용 기본 문장과 오프라인 평가도
 LGBM19 결과에 A/B 산식·배수 문장을 붙이지 않고 LLM을 호출하지 않는다. 비교표의 위험은
 미산출이며 표본 부족으로 단정하지 않는다. prompt·InsightResponse·Spring/Client 계약은
