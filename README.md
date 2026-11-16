@@ -262,7 +262,7 @@ Spring이 업무 데이터·상태·결과 저장을 소유하고 FastAPI reader
 | `ai_product_daily_stocks_v1` | 지정한 DONE source의 상품 일별 계산 입력 |
 | `ai_cleaning_sources_v1` | 현재 정제 파일의 소유권·상태와 이전 월 최신 revision 확인 |
 | `ai_cleaning_products_v1` | 회원별 기존 바코드와 새 상품 판정 |
-| `ai_cleaning_previous_units_v1` | 검증된 이전 파일의 재고관리단위별 월말 기말 |
+| `ai_cleaning_previous_units_v1` | 검증된 이전 파일의 재고관리단위별 월말 기말(월말 전에 기록이 끝난 단위는 소진으로 보고 0개, #115) |
 
 view는 회원별 RLS를 대신하지 않습니다. repository가 회원·창고·source를 확인하며 reader에는
 업무 table 직접 조회·DML·DDL·migration 권한을 주지 않습니다.

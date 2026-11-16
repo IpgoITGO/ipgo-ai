@@ -112,6 +112,62 @@ def test_readonly_owner_latest_revision_contract(monkeypatch):
         repository.load_cleaning_context(3, 4, 7, None, source)
 
 
+MAY = SimpleNamespace(upload_file_id=7, storage_key="fake", original_name="2026년 5월.xlsx")
+MAY_SOURCE = (7, 3, 4, "fake", MAY.original_name, date(2026, 5, 1), date(2026, 5, 31), 2, "PROCESSING")
+APRIL_SOURCE = (6, 3, 4, "old", "old.xlsx", date(2026, 4, 1), date(2026, 4, 30), 3, "DONE")
+# A는 4/30까지 남았고(기말 10), B는 4/11 · C는 4/1에 다 팔려 그 뒤로 기록이 없다(#115).
+APRIL_UNITS = [("A", date(2026, 4, 1), date(2026, 4, 30), Decimal("10.000")),
+               ("A", date(2026, 4, 1), date(2026, 4, 29), 11),
+               ("B", date(2026, 4, 2), date(2026, 4, 11), 0),
+               ("B", date(2026, 4, 2), date(2026, 4, 10), 3),
+               ("C", date(2026, 4, 1), date(2026, 4, 1), 0)]
+
+
+def _fake_database(monkeypatch, units):
+    cursor = Cursor(MAY_SOURCE, APRIL_SOURCE, units)
+    monkeypatch.setattr(repository, "get_settings", lambda: SimpleNamespace(database_url="fake"))
+    monkeypatch.setattr(repository.psycopg, "connect", lambda *_a, **_kw: Connection(cursor))
+
+
+def test_previous_month_depleted_units_carry_zero(monkeypatch):
+    _fake_database(monkeypatch, APRIL_UNITS)
+    _, previous, _ = repository.load_cleaning_context(3, 4, 7, 6, MAY)
+    assert previous == {("A", date(2026, 4, 1)): 10, ("B", date(2026, 4, 2)): 0, ("C", date(2026, 4, 1)): 0}
+
+
+def test_next_month_cleans_after_previous_month_depletion(client, monkeypatch):
+    monkeypatch.setenv("ENGINE_MODE", "real")
+    _fake_database(monkeypatch, APRIL_UNITS)
+    monkeypatch.setattr(jobs.storage, "read_source_file", lambda _: build_ledger([1, 2], [UNIT]))
+    result = client.post("/engine/clean", json=PAYLOAD)
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["unitDailyRecords"][0]["openingQty"] == 10
+    assert body["validation"]["excludedSkus"] == []
+    # 소진된 B가 입고 없이 재고 5로 다시 나타나면 기초 0과 맞지 않아 제외한다.
+    revived = {**UNIT, "barcode": "DEF", "mixed_id": "B", "name": "상품 B", "received_on": "2026-04-02",
+               "records": {1: (0, 0, 0, 5), 2: (0, 0, 0, 5)}}
+    monkeypatch.setattr(jobs.storage, "read_source_file", lambda _: build_ledger([1, 2], [UNIT, revived]))
+    result = client.post("/engine/clean", json=PAYLOAD)
+    assert result.status_code == 200, result.text
+    assert [sku["skuBarcode"] for sku in result.json()["validation"]["excludedSkus"]] == ["DEF"]
+
+
+@pytest.mark.parametrize(("units", "message"), [
+    ([("A", date(2026, 4, 1), date(2026, 5, 1), 10)], "기간을 벗어났어요"),
+    ([("A", date(2026, 4, 1), date(2026, 3, 31), 10)], "기간을 벗어났어요"),
+    ([("B", date(2026, 4, 2), date(2026, 4, 11), 0), ("B", date(2026, 4, 2), date(2026, 4, 11), 1)], "중복"),
+    ([("B", date(2026, 4, 2), date(2026, 4, 11), -1)], "수량"),
+    ([("B", date(2026, 4, 2), date(2026, 4, 11), Decimal("0.5"))], "수량"),
+    ([("", date(2026, 4, 2), date(2026, 4, 11), 0)], "재고관리단위"),
+    ([], "기록이 없어"),
+])
+def test_previous_month_rejects_broken_records(monkeypatch, units, message):
+    _fake_database(monkeypatch, units)
+    with pytest.raises(CleaningInputError, match=message):
+        repository.load_cleaning_context(3, 4, 7, 6, MAY)
+
+
 @pytest.mark.parametrize("units", [
     [{**UNIT, "records": {1: (2**53, 0, 0, 0)}}],
     [UNIT, UNIT],
