@@ -149,3 +149,43 @@ def test_checked_and_excluded_counts_follow_stock_balance(client, monkeypatch):
     assert report["checkedSkuCount"] == 2
     assert report["targetSkuCount"] == 1
     assert [sku["skuBarcode"] for sku in report["excludedSkus"]] == ["DEF"]
+
+
+@pytest.mark.parametrize("name", ["수불부.xlsx", "2026년 5월.xlsx"])
+def test_clean_uses_verified_upload_period_without_renaming_source(client, monkeypatch, name):
+    monkeypatch.setenv("ENGINE_MODE", "real")
+    monkeypatch.setattr(jobs.storage, "read_source_file", lambda _: build_ledger([1, 2], [UNIT]))
+    seen = []
+
+    def context(user_id, warehouse_id, upload_id, previous_id, source):
+        seen.append(source.original_name)
+        return set(), {}, (date(2026, 5, 1), date(2026, 5, 31))
+
+    monkeypatch.setattr(repository, "load_cleaning_context", context)
+    payload = {**PAYLOAD, "files": [{**PAYLOAD["files"][0], "originalName": name}]}
+    result = client.post("/engine/clean", json=payload)
+    assert result.status_code == 200, result.text
+    assert seen == [name]
+    assert result.json()["periodStart"] == "2026-05-01"
+    assert result.json()["asOfDate"] == "2026-05-02"
+    assert result.json()["unitDailyRecords"][0]["closingQty"] == 8
+    job = jobs.JobEnvelope(contractVersion="1", jobId="period", jobType="CLEAN", payload=payload)
+    assert jobs.execute(job).result == result.json()
+    assert seen == [name, name]
+
+
+@pytest.mark.parametrize("name,period", [
+    ("2026-04.xlsx", (date(2026, 5, 1), date(2026, 5, 31))),
+    ("2026-04_2026-05.xlsx", (date(2026, 5, 1), date(2026, 5, 31))),
+    ("수불부.xlsx", (date(2026, 5, 1), date(2026, 6, 1))),
+    ("수불부.xlsx", (date(2026, 5, 31), date(2026, 5, 1))),
+    ("수불부.xlsx", None),
+    ("수불부.xlsx", (date(2026, 5, 2), date(2026, 5, 31))),
+])
+def test_clean_rejects_conflicting_or_unavailable_period(name, period):
+    from engine.clean import clean
+    from schemas.engine import SourceFile
+
+    source = SourceFile(upload_file_id=7, storage_key="fake", original_name=name)
+    with pytest.raises(CleaningInputError):
+        clean([(source, build_ledger([1, 2], [UNIT]))], set(), period=period)
