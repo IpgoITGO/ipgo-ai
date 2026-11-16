@@ -22,6 +22,10 @@ HTTP calculate, SQS CALCULATE, CUSTOM은 같은 bundle을 사용한다. 검증�
 
 기본 Dockerfile은 libgomp1과 고정 라이브러리를 설치한다. 기본 이미지 빌드 후 Dockerfile.model19가 Git에서 제외된 model_assets를 /opt/ipgo-model19에 복사한다. 로컬 이미지에도 실제 모델이 포함되므로 승인 없이 공개 registry로 push/export하지 않는다. model_assets를 제거한 CI 기본 빌드도 유지한다.
 
+개발 대상 ARM64는 Dockerfile.model19.arm64로 ARM wheel/공유 라이브러리를 native builder에서 준비해 cross-build한다. 호스트의 binfmt나 시스템 패키지를 바꿀 필요가 없다. ARM 이미지의 모델/API는 private QEMU user-mode에서도 검증했지만 이는 네이티브 ARM 성능 검증이 아니다.
+
+기존 dev workflow의 model19_enabled 기본은 false다. true일 때는 engine_mode=real, 올바른 model19_version, 기존 immutable SHA 이미지가 필수이며 없으면 기본 Dockerfile로 대체하지 않고 중단한다. ECR에서 검증한 이미지로 모델 버전/해시를 native runner에서 검사한 뒤에만 task snapshot/path를 렌더링한다. 비공개 모델 이미지의 ECR push와 실제 workflow 실행은 별도 승인을 받는다. 이미지 태그는 최종 승인된 dev SHA/아키텍처 규칙을 따르며 로컬 feature SHA를 임의로 대체하지 않는다.
+
 AWS 리소스/권한/Secret 생성은 필요하지 않은 것으로 설계했다. 이미지 push·실제 task 등록·환경변수 변경·서비스 갱신은 실행하지 않는다. 배포 전 실제 메모리/큐 처리/컨테이너 입력 크기와 정확한 SHA·이미지 digest를 확인한다.
 
 복구는 새 계산 요청을 B로 돌리고 이전 AI 이미지와 모델 버전을 복원하는 방식이다. 과거 LGBM19 결과나 snapshot을 B로 덮어쓰지 않는다. 과거 CUSTOM 재생이 필요하면 해당 버전 bundle을 제공해야 한다.

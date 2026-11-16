@@ -12,6 +12,16 @@ on:
         description: "Full approved commit SHA"
         required: true
         type: string
+      model19_enabled:
+        description: "Use a prebuilt private model19 image; never build a weightless fallback"
+        required: false
+        default: false
+        type: boolean
+      model19_version:
+        description: "Exact modelVersion from the approved private bundle manifest"
+        required: false
+        default: ""
+        type: string
       continuous_llm_approved:
         description: "Approve ongoing LLM; Server monthly quota waiver needs separate explicit approval"
         required: false
@@ -83,6 +93,8 @@ jobs:
       AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
       DEPLOYMENT_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       EXPECTED_SHA: ${{ inputs.expected_sha }}
+      MODEL19_ENABLED: ${{ inputs.model19_enabled }}
+      MODEL19_VERSION: ${{ inputs.model19_version }}
       CONTINUOUS_LLM_APPROVED: ${{ inputs.continuous_llm_approved }}
       IPGO_LLM_EXPIRES_AT: ${{ inputs.llm_expires_at }}
       COMPUTE_MODE: ${{ vars.AWS_DEV_COMPUTE_MODE }}
@@ -167,6 +179,7 @@ jobs:
           git cat-file -e "$WORKFLOW_SHA^{commit}"
           git show "$WORKFLOW_SHA:scripts/deployment/verify_deployment.py" > "$RUNNER_TEMP/verify_deployment.py"
           git show "$WORKFLOW_SHA:scripts/deployment/check_ecr_image.py" > "$RUNNER_TEMP/check_ecr_image.py"
+          git show "$WORKFLOW_SHA:scripts/deployment/model19_gate.py" > "$RUNNER_TEMP/model19_gate.py"
           python3 "$RUNNER_TEMP/verify_deployment.py" ci --service ai
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
         with:
@@ -188,6 +201,11 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ipgo-dev/ai
         run: python3 "$RUNNER_TEMP/check_ecr_image.py"
+      - name: Require prebuilt model19 image
+        env:
+          ENGINE_MODE: ${{ inputs.engine_mode }}
+          IMAGE_EXISTS: ${{ steps.image_lookup.outputs.exists }}
+        run: python3 "$RUNNER_TEMP/model19_gate.py" guard
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
         if: steps.image_lookup.outputs.exists == 'false'
       - name: Build and push immutable image
@@ -210,9 +228,20 @@ jobs:
           ECR_REPOSITORY: ipgo-dev/ai
           EXPECTED_IMAGE_DIGEST: ${{ steps.image_lookup.outputs.digest }}
         run: python3 "$RUNNER_TEMP/check_ecr_image.py" --require-present
+      - name: Verify private model bundle
+        if: inputs.model19_enabled
+        env:
+          MODEL_IMAGE: ${{ steps.verified_image.outputs.image }}
+        run: |
+          docker pull "$MODEL_IMAGE" >/dev/null 2>&1
+          docker run --rm --network none --read-only --tmpfs /tmp:size=16m \
+            --memory=256m --cpus=0.5 -e MODEL19_VERSION "$MODEL_IMAGE" \
+            python -c 'import os; from engine.model19 import load_bundle; load_bundle("/opt/ipgo-model19", os.environ["MODEL19_VERSION"]); print("model19 bundle verified")'
       - name: Capture active service task definitions
         timeout-minutes: 2
         run: python3 "$RUNNER_TEMP/verify_deployment.py" snapshot --service ai
+      - name: Configure model19 path
+        run: python3 "$RUNNER_TEMP/model19_gate.py" configure
       - name: Configure API OpenAI secret
         env:
           ENGINE_MODE: ${{ inputs.engine_mode }}
