@@ -132,6 +132,7 @@ class CleanResponse(CamelModel):
 class Policy(CamelModel):
     """정책 선정(DA-09) 결과. 백테스트 전까지는 B · 1.00."""
 
+    model_version: str | None = Field(None, min_length=1, max_length=100, exclude_if=lambda v: v is None)
     default_method: Method = Method.B
     multiplier: float = Field(1.0, ge=1.0, le=1.5)
 
@@ -171,6 +172,7 @@ class CalculateRequest(CamelModel):
     product_ids: list[int] | None = None    # None이면 전체
     policy: Policy
     settings: list[ProductSettings]
+    product_codes: dict[int, str] = Field(default_factory=dict, exclude_if=lambda v: not v)
     planned_receipts: list[PlannedReceiptInput] = []
     no_date_receipts: list[NoDateReceiptInput] = Field(default_factory=list)
 
@@ -228,6 +230,9 @@ class ProductResult(CamelModel):
     reason: str | None = None               # NOT_CALCULABLE · EXCLUDED · REUPLOAD_REQUIRED면 필수
 
     # 계산 근거 (FE-05 · K1 result)
+    model_version: str | None = Field(None, exclude_if=lambda v: v is None)
+    target_stock_qty: float | None = Field(None, exclude_if=lambda v: v is None)
+    model_fallback: bool = Field(False, exclude_if=lambda v: not v)
     method: Method | None = None
     method_reason: str | None = None        # "평가 결과 기본 방식", "작년 자료 없어 B로 대체"
     method_fallback: bool | None = None     # 산식이 있는 결과에서 기본 방식과 실제 방식의 차이

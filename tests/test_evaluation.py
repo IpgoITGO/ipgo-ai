@@ -70,6 +70,7 @@ def test_test_changes_never_change_tune_selection_or_accuracy():
     daily = dataset()
     original = daily.copy(deep=True)
     first = run_backtest(request(), daily)
+    assert {m.method.value for m in first.method_errors} == {"A", "B"}
     changed = daily.copy()
     test = changed.stock_date >= date(2026,8,1)
     # 미래 실적만 바꾸며 재고 항등식은 유지한다.

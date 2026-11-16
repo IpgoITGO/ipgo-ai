@@ -8,6 +8,9 @@ RUN groupadd --system --gid 10001 ipgo \
     && useradd --system --uid 10001 --gid ipgo --home-dir /app --shell /usr/sbin/nologin ipgo
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt requirements.txt
 COPY requirements requirements
 RUN python -m pip install --no-cache-dir -r requirements.txt

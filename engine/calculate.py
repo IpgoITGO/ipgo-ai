@@ -69,6 +69,7 @@ def _not_calculable(product_id: int, reason: str, valid_days: int | None = None)
 
 def _product(
     request: CalculateRequest, daily: pd.DataFrame, product_id: int, settings: ProductSettings | None,
+    model_bundle=None,
 ) -> tuple[ProductResult, dict[int, float]]:
     # 사유는 화면 · 인사이트 고정 문장에 그대로 보이므로 셀러가 할 일을 알 수 있는 말로 쓴다 (#68).
     # Spring은 입고 조건이나 원가가 비면 settings를 보내지 않는다.
@@ -94,6 +95,8 @@ def _product(
 
     horizon = settings.lead_time_days + settings.review_cycle_days
     gap = (request.today - request.as_of_date).days
+    if request.policy.default_method is Method.LGBM19:
+        return _model_product(request, daily, product_id, settings, float(closing.iloc[0]), valid_days, model_bundle)
     method = request.policy.default_method
     forecasts = {Method.A: forecast_a, Method.B: forecast_b}
     forecast = forecasts[method](daily, request.as_of_date, gap + horizon)
@@ -136,6 +139,42 @@ def _product(
         planned_receipts_in_horizon=planned_qty, pre_arrival_unmet_qty=baseline.pre_arrival_unmet,
         required_qty_before_rounding=need, recommended_qty=qty, recommended_amount=qty * settings.unit_cost,
         valid_observation_days=valid_days, accuracy_grade=grade(valid_days, None), expected_shortage_on=shortage,
+    ), planned
+
+
+def _model_product(request, daily, product_id, settings, closing, valid_days, bundle):
+    from engine.model19 import Model19Error
+
+    if (settings.lead_time_days, settings.review_cycle_days, request.policy.multiplier) != (5, 14, 1):
+        return _not_calculable(product_id, "이 모델은 배송 5일·발주 주기 14일·배수 1 조건에서만 계산해요", valid_days)
+    try:
+        if bundle is None:
+            raise Model19Error("모델 연결이 준비되지 않았어요")
+        prediction = bundle.predict(daily, request.product_codes.get(product_id, ""), request.today)
+    except Model19Error as exc:
+        return _not_calculable(product_id, str(exc), valid_days)
+    gap = (request.today - request.as_of_date).days
+    before, planned = split_planned_receipts(
+        [(r.expected_on, r.quantity) for r in request.planned_receipts if r.product_id == product_id],
+        request.as_of_date, request.today, 19,
+    )
+    # P50은 수요/일별 재고 설명용, target은 안전 여유를 포함한 발주 목표다.
+    # 보고서 정책에는 도착 전 미충족을 추가 차감하는 항이 없다.
+    stock = start_stock(closing, prediction.p50 / 19, gap, before)
+    baseline = simulate(stock, [prediction.p50 / 19] * 19, 0, 5, planned)
+    need = max(0., prediction.target - stock - sum(planned.values()) - 1e-12)
+    qty = round_to_order_unit(need, settings.order_unit_qty)
+    past = stockout_since(request.as_of_date, closing, prediction.p50 / 19, gap, before) if stock <= 0 else None
+    future = request.today + timedelta(days=baseline.depletion_day) if baseline.depletion_day else None
+    return ProductResult(
+        product_id=product_id, status=ResultStatus.OK if qty else ResultStatus.NOT_NEEDED,
+        method=Method.LGBM19, method_reason="고정 19일 분위수 예측과 전체 오차 보정으로 계산했어요",
+        method_fallback=False, model_fallback=prediction.fallback, model_version=bundle.version,
+        target_stock_qty=prediction.target, multiplier=1., horizon_days=19,
+        forecast_outbound_qty=prediction.p50, start_stock_qty=stock, start_stock_estimated=gap > 0,
+        planned_receipts_in_horizon=sum(planned.values()), pre_arrival_unmet_qty=baseline.pre_arrival_unmet,
+        required_qty_before_rounding=need, recommended_qty=qty, recommended_amount=qty * settings.unit_cost,
+        valid_observation_days=valid_days, expected_shortage_on=(past or future) if qty else None,
     ), planned
 
 
@@ -236,6 +275,7 @@ def _apply_accuracy(result, request, settings, context, indexed, selector=None):
 
 def calculate(
     request: CalculateRequest, product_daily: pd.DataFrame, *, risk_context: RiskContext | None = None,
+    model_bundle=None,
 ) -> CalculateResponse:
     """D=g+H일 예측에서 H일 필요량(개)을 구하고, 권장량의 80/100/120%를 입고 단위로 올려 비교한다."""
     settings, daily, ids = _inputs(request, product_daily)
@@ -257,7 +297,7 @@ def calculate(
             rows = positions.get(product_id)
             sku_daily = daily.iloc[rows] if rows is not None else empty
         config = settings.get(product_id)
-        result, planned = _product(request, sku_daily, product_id, config)
+        result, planned = _product(request, sku_daily, product_id, config, model_bundle)
         result.no_date_receipt_qty = sum(r.quantity for r in request.no_date_receipts if r.product_id == product_id)
         if result.status is ResultStatus.OK:
             for kind, percent in [(ScenarioType.P80, 80), (ScenarioType.P100, 100), (ScenarioType.P120, 120)]:
@@ -275,6 +315,7 @@ def calculate(
 
 def custom_scenario(
     request: ScenarioRequest, product_daily: pd.DataFrame, *, risk_context: RiskContext | None = None,
+    model_bundle=None,
 ) -> ScenarioResult:
     """한 상품의 같은 입력 snapshot으로 재계산하고, 직접 입력한 수량(개)을 그대로 시뮬레이션한다."""
     ci = request.calculation_input
@@ -283,7 +324,7 @@ def custom_scenario(
         raise CalculationInputError("직접 입력 시나리오는 상품 1개의 계산 입력이 필요해요")
     product_id = ids[0]
     config = settings.get(product_id)
-    result, planned = _product(ci, daily, product_id, config)
+    result, planned = _product(ci, daily, product_id, config, model_bundle)
     if result.status is ResultStatus.NOT_CALCULABLE:
         raise CalculationInputError(result.reason)
     quantities = {

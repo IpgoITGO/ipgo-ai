@@ -17,6 +17,7 @@ class Settings:
     upload_bucket: str | None
     jobs_queue_url: str | None
     results_queue_url: str | None
+    model19_directory: str = ""
     risk_enabled: bool = True
     original_database_url: str | None = None
 
@@ -24,6 +25,7 @@ class Settings:
 def get_settings() -> Settings:
     """요청마다 읽는다 (테스트에서 환경 변수를 바꿔 끼울 수 있게)."""
     return Settings(
+        model19_directory=os.getenv("IPGO_MODEL19_DIR", ""),
         engine_mode=os.getenv("ENGINE_MODE", "mock"),
         embedded_worker_enabled=os.getenv("IPGO_EMBEDDED_WORKER_ENABLED", "false").lower() == "true",
         database_url=os.getenv("DATABASE_URL") or None,
