@@ -59,7 +59,7 @@ def clean(files: list[tuple[SourceFile, bytes]], known_barcodes: set[str],
     source, content = files[0]
     try:
         try:
-            units = read_ledger(content, source.original_name, quarantine_pre_receipt=True)
+            units = read_ledger(content, source.original_name, quarantine_pre_receipt=True, period=period)
         except CleaningInputError:
             raise
         except Exception as exc:
@@ -155,8 +155,11 @@ def estimate_review_cycle_days(product_daily: pd.DataFrame, excluded_barcodes: s
     return floor(median(cycles) + 0.5) if cycles else None
 
 
-def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: bool = False) -> pd.DataFrame:
-    """엑셀 수불부 1개(재고관리단위 × 날짜 가로형)를 세로형으로 바꾼다. 연 · 월은 파일명(YYYY-MM · YYYYMM)에서 읽는다.
+def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: bool = False,
+                period: tuple[date, date] | None = None) -> pd.DataFrame:
+    """엑셀 수불부 1개(재고관리단위 × 날짜 가로형)를 세로형으로 바꾼다.
+
+    연 · 월은 검증된 업로드 기간을 쓰며, 기간이 없으면 파일명에서 읽는다.
 
     반환 칼럼: source_file, source_sheet, source_row, source_inventory_key(sku_mixed_id), received_on,
     sku_barcode, sku_name, unit_cost, stock_date, inbound_qty, outbound_qty, adjustment_qty, closing_qty
@@ -165,9 +168,18 @@ def read_ledger(content: bytes, original_name: str, *, quarantine_pre_receipt: b
     """
     months = {(int(m.group(1)), int(m.group(2))) for pattern in (YEAR_MONTH, KOREAN_MONTH)
               for m in pattern.finditer(original_name)}
-    if len(months) != 1:
-        raise CleaningInputError("파일명에 유효한 연월 하나가 필요해요")
-    year, month = months.pop()
+    if period is not None:
+        start, end = period
+        if start > end or (start.year, start.month) != (end.year, end.month):
+            raise CleaningInputError("업로드 기간은 같은 월이어야 해요")
+        expected = (start.year, start.month)
+        if months and months != {expected}:
+            raise CleaningInputError("파일명 연월이 업로드 기간과 일치하지 않아요")
+        year, month = expected
+    else:
+        if len(months) != 1:
+            raise CleaningInputError("파일명에 유효한 연월 하나가 필요해요")
+        year, month = months.pop()
 
     try:
         with ZipFile(BytesIO(content)) as archive:
