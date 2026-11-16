@@ -99,8 +99,18 @@ class Bundle:
         row = features.features_and_labels(sku).iloc[[-1]]
         if row.valid_days_28.iloc[0] < 7:
             raise Model19Error("최근 28일의 유효 기록이 7일보다 적어요")
-        raw = np.column_stack([m.predict(features.matrix(row), num_threads=1) for m in self.models])
-        values, fallback = features.postprocess(raw, row, self.counts)
+        try:
+            raw = np.column_stack([
+                np.asarray(m.predict(features.matrix(row), num_threads=1), dtype=float) for m in self.models
+            ])
+        except (ValueError, TypeError) as exc:
+            raise Model19Error("모델 계산 결과가 유효하지 않아요") from exc
+        if raw.shape != (len(row), 3) or not np.isfinite(raw).all():
+            raise Model19Error("모델 계산 결과가 유효하지 않아요")
+        try:
+            values, fallback = features.postprocess(raw, row, self.counts)
+        except AssertionError as exc:
+            raise Model19Error("모델 계산 결과가 유효하지 않아요") from exc
         p50, p80, p90 = (float(x) for x in values[0])
         r = row.iloc[0]
         rate, cv = r.positive_rate_90, r.std_90 / max(r.mean_90, 1e-12)
