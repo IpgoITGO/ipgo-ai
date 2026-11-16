@@ -2,6 +2,11 @@
 
 고정19일 LightGBM/BUFFER100_FLOOR0은 명시적인 LGBM19 요청과 비공개 모델 bundle로 연결합니다. 입력·보정·버전·미산출 평가·이미지 준비/복구는 [모델 연결 계약](docs/model19-integration.md)을 따릅니다. ARM 사전 빌드 이미지의 실제 `uvicorn` 실행과 모델 로딩을 확인한 뒤 ECS를 변경합니다. 코드/로컬 검증과 실제 AWS 배포는 구분합니다.
 
+모델이 NaN·무한대 또는 잘못된 크기의 예측을 반환하면 해당 상품을 `NOT_CALCULABLE`로
+처리합니다. 0개 권장이나 A/B 대체로 숨기지 않으며 HTTP·worker는 같은 사유를 반환합니다.
+`tests/test_model19_validation.py`는 합성 파일과 가짜 Booster로 bundle의 해시·메타데이터·
+오차 보정 기간 검사 및 비유한 추론 실패 경계를 검증합니다. 실제 가중치 호환성·성능 검사는 별도입니다.
+
 개발 CI의 일반 테스트와 독립 실행 이미지 검사는 병렬로 수행합니다. 배포 전에는 기존 네 CI 작업의 전체 성공을 확인하며, ARM 용량·실행 이미지 import·SHA 이미지 재사용 검사를 유지합니다.
 
 LLM의 OpenAI SDK와 httpx는 배포 의존성에 포함하며 CI에서 실제 runtime 이미지의 앱 import와 client 초기화를 외부 호출 없이 검사합니다.
