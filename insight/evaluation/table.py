@@ -6,7 +6,7 @@
 참조 구현의 "리드타임" · "입고 단위" 행은 0002 ProductResult에 없는 값이라 뺐다.
 """
 
-from schemas.base import RiskStatus, ScenarioType
+from schemas.base import Method, RiskStatus, ScenarioType
 from tests.insight_fallback import _date, _demand, _int, _pct, _stock
 
 from .cases import EXPERIMENT_TYPES, EvalCase
@@ -23,6 +23,8 @@ LABELS = {
 
 def _risk(case: EvalCase, risk: float | None, with_n: bool = False) -> str:
     r = case.result
+    if r.method == Method.LGBM19:
+        return "미산출"
     if r.risk_status != RiskStatus.OK or risk is None:
         return "미산출 (표본 부족)" if with_n else "미산출"
     s = _pct(risk)
@@ -39,8 +41,12 @@ def render_table(case: EvalCase) -> dict:
     if r.method is not None and r.recommended_qty is not None:
         facts += [
             ("권장 입고량", f"{_int(r.recommended_qty)}개"),
-            ("적용 산식", f"계산식 {r.method.value}"),
-            ("배수", _pct(r.multiplier)),
+        ]
+        if r.method == Method.LGBM19:
+            facts.append(("예측 방식", "고정19일 LightGBM"))
+        else:
+            facts += [("적용 산식", f"계산식 {r.method.value}"), ("배수", _pct(r.multiplier))]
+        facts += [
             ("커버 기간", f"{_int(r.horizon_days)}일"),
             ("커버 기간 예상 출고", f"{_demand(r.forecast_outbound_qty)}개"),
             ("현재 재고", f"{_stock(r.start_stock_qty)}개"),

@@ -111,6 +111,9 @@ def _key(s: ScenarioResult) -> str:
 
 def placeholder_values(r: ProductResult, ctx: Context) -> dict[str, str]:
     """6장 조각에 들어가는 자리 표시자 값. 값이 없는 항목은 넣지 않는다 (#4 문서 5장)."""
+    # #122: LGBM19는 A/B 산식·배수 기반 문장의 대상이 아니다. 설명은 활성화하지 않는다.
+    if r.method == Method.LGBM19:
+        return {}
     v: dict[str, str] = {}
     if r.reason:
         v["reason"] = r.reason.strip().rstrip(".")
@@ -196,6 +199,8 @@ def fill(template: str, values: dict[str, str]) -> str:
 
 def build_fallback(r: ProductResult, ctx: Context | None = None) -> Fallback | None:
     """상태별 기본 문장. 필요한 키가 하나라도 없으면 None (비교표만)."""
+    if r.method == Method.LGBM19:
+        return None
     ctx = ctx or Context()
     template = fallback_template(r, ctx)
     values = placeholder_values(r, ctx)
