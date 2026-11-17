@@ -28,11 +28,11 @@ class OneboxPolicyTests(unittest.TestCase):
             "healthCheckGracePeriodSeconds": 300, "desiredCount": 1, "runningCount": 1, "pendingCount": 0,
         }
         self.definition = {
-            "taskDefinitionArn": self.arn, "family": self.name, "networkMode": "bridge", "memory": "256",
+            "taskDefinitionArn": self.arn, "family": self.name, "networkMode": "bridge", "memory": "512",
             "requiresCompatibilities": ["EC2"],
             "runtimePlatform": {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"},
             "containerDefinitions": [{
-                "name": "ai-api", "memory": 256,
+                "name": "ai-api", "memory": 512,
                 "portMappings": [{"containerPort": 8000, "hostPort": 18000, "protocol": "tcp", "name": "http"}],
             }],
         }
@@ -97,11 +97,11 @@ class OneboxPolicyTests(unittest.TestCase):
         original = copy.deepcopy(self.definition)
         for parent, key, wrong in [
             ((), "taskDefinitionArn", self.arn + "0"), ((), "family", "other"),
-            ((), "networkMode", "awsvpc"), ((), "memory", "512"),
+            ((), "networkMode", "awsvpc"), ((), "memory", "256"),
             ((), "requiresCompatibilities", ["FARGATE"]),
             (("runtimePlatform",), "cpuArchitecture", "X86_64"),
             (("runtimePlatform",), "operatingSystemFamily", "WINDOWS_SERVER_2022_CORE"),
-            (("containerDefinitions", 0), "memory", 512),
+            (("containerDefinitions", 0), "memory", 256),
             (("containerDefinitions", 0, "portMappings", 0), "hostPort", 0),
             (("containerDefinitions", 0, "portMappings", 0), "containerPort", 9000),
             (("containerDefinitions", 0, "portMappings", 0), "protocol", "udp"),
@@ -120,7 +120,7 @@ class OneboxPolicyTests(unittest.TestCase):
 
     def test_missing_containers_ports_and_invalid_counts_fail_closed(self):
         original = copy.deepcopy(self.definition)
-        for containers in ([], [{"name": "ai-api", "memory": 256}], original["containerDefinitions"] * 2):
+        for containers in ([], [{"name": "ai-api", "memory": 512}], original["containerDefinitions"] * 2):
             self.definition = {**original, "containerDefinitions": containers}
             with self.subTest(containers=containers), self.assertRaises(M.GateError):
                 self.check()
