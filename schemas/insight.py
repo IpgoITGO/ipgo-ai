@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from .base import CamelModel, RiskStatus, ScenarioType
+from .base import CamelModel, Method, RiskStatus, ScenarioType
 
 
 class Validation(StrEnum):
@@ -29,7 +29,8 @@ class InsightInput(CamelModel):
     recommended: ScenarioType               # 보통 P100
     placeholders: list[str]                 # ["qty_p80", "qty_p100", ..., "risk_pre"]
     directions: dict[str, Literal["높음", "낮음", "같음"]]
-    risk_status: RiskStatus
+    risk_status: RiskStatus | Literal["NOT_COMPUTED"]
+    method: Method | None = Field(default=None, exclude_if=lambda v: v is None)
     # 기존 이름 목록 요청도 수용한다. 새 변환기는 아래 계산 메타데이터를 명시적으로 채운다 (#36).
     scenarios: list[ScenarioType] = Field(default_factory=list)
     method_fallback: bool = False
@@ -38,6 +39,8 @@ class InsightInput(CamelModel):
 
     @model_validator(mode="after")
     def _scenario_names_match_quantities(self) -> InsightInput:
+        if (self.method == Method.LGBM19) != (self.risk_status == "NOT_COMPUTED"):
+            raise ValueError("LGBM19 입력은 위험 미산출 NOT_COMPUTED 상태만 허용해요")
         if self.scenarios:
             present = {scenario for scenario in ScenarioType if f"qty_{scenario.value.lower()}" in self.placeholders}
             if len(set(self.scenarios)) != len(self.scenarios) or set(self.scenarios) != present:

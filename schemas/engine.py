@@ -275,11 +275,13 @@ class ProductResult(CamelModel):
         """계산 불가 · 제외 결과는 이유 없이 내보내지 않는다 (0개로 바꾸지 않는다)."""
         if self.status in _REASON_REQUIRED and not self.reason:
             raise ValueError(f"status가 {self.status}이면 reason이 필요해요")
-        if self.insight_input is not None and (
-            self.status != ResultStatus.OK or self.risk_status is None
-            or self.insight_input.risk_status != self.risk_status
-        ):
-            raise ValueError("insightInput은 위험 상태가 일치하는 OK 결과에만 넣을 수 있어요")
+        if self.insight_input is not None:
+            model_input = self.insight_input.method == Method.LGBM19
+            if (self.status != ResultStatus.OK
+                    or (model_input and (self.method != Method.LGBM19 or self.risk_status is not None))
+                    or (not model_input and (self.method == Method.LGBM19 or self.risk_status is None
+                                            or self.insight_input.risk_status != self.risk_status))):
+                raise ValueError("insightInput은 계산 방식과 위험 상태가 일치하는 OK 결과에만 넣을 수 있어요")
         return self
 
 

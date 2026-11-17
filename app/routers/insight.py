@@ -13,6 +13,7 @@ from app.mocks import load_mock
 from insight.llm import LLMClient, OpenAIClient
 from insight.prompt import InsightInputError
 from insight.service import generate_insight
+from schemas.base import Method
 from schemas.insight import InsightRequest, InsightResponse
 
 router = APIRouter()
@@ -34,6 +35,8 @@ def get_llm_client() -> LLMClient | None:
 @router.post("/insight", response_model=InsightResponse, response_model_by_alias=True)
 def insight(req: InsightRequest, client: Annotated[LLMClient | None, Depends(get_llm_client)]) -> InsightResponse:
     """AI-01 ~ AI-03 자리 표시자 문장 초안 생성 · 검사. LLM 실패도 200 + FAILED (Spring이 기본 문장으로 대체)."""
+    if req.input.method == Method.LGBM19 and not get_settings().model_insight_enabled:
+        raise AppError(409, "MODEL_INSIGHT_DISABLED", "예측 모델 설명은 비활성 상태예요")
     if client is None:
         return load_mock("insight", InsightResponse)
     try:

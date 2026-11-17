@@ -1,11 +1,9 @@
 """#122: 예측 모델(LGBM19) 결과용 prompt. 기존 A · B prompt와 따로 두고, 활성화 전에는 호출하지 않는다."""
-import inspect
 import json
 import re
 
 import pytest
 
-import insight.service
 from insight.model_prompt import MODEL_PROMPT_VERSION, MODEL_SYSTEM_PROMPT, build_model_prompt
 from insight.prompt import PROMPT_VERSION, SYSTEM_PROMPT, InsightInputError, draft_text
 from insight.validator import PLACEHOLDER_RE, check_draft
@@ -29,11 +27,12 @@ def _keys(*scenarios: str) -> list[str]:
 def _input(*scenarios: str, extra: tuple[str, ...] = (), drop: tuple[str, ...] = (), **changes) -> InsightInput:
     scenarios = scenarios or ("p80", "p100", "p120")
     fields = dict(
-        sku_label="상품 A", recommended="P100", risk_status=RiskStatus.INSUFFICIENT_SAMPLE,
+        sku_label="상품 A", recommended="P100", risk_status="NOT_COMPUTED", method="LGBM19",
         placeholders=[k for k in _keys(*scenarios) + list(extra) if k not in drop],
         directions={f"ending_{x}_vs_p100": "낮음" if x == "p80" else "높음" for x in scenarios if x != "p100"},
     )
-    return InsightInput(**(fields | changes))
+    # prompt 방어 검사에는 wire 검증을 통과할 수 없는 조합도 직접 전달한다.
+    return InsightInput(**fields).model_copy(update=changes)
 
 
 def _example() -> str:
@@ -47,18 +46,13 @@ def test_model_prompt_is_separate_from_ab_prompt():
     assert PROMPT_VERSION == "prompt-2026.11.13-v0.8"  # 기존 A · B prompt는 바뀌지 않는다
 
 
-def test_service_does_not_call_model_prompt_yet():
-    # 모델 결과의 설명은 미생성이 현재 결정이다 (#122). 연결은 활성화가 결정된 뒤에 한다.
-    assert "model_prompt" not in inspect.getsource(insight.service)
-
-
 def test_prompt_states_risk_is_not_computed_without_ab_wording():
     prompt = build_model_prompt(_input())
     assert prompt.system == MODEL_SYSTEM_PROMPT
     assert NO_RISK_LINE in prompt.user
     for word in ("표본", "여유 배수", "계산식", "추정치"):
         assert word not in prompt.user
-    assert prompt.required == ["qty_p100"]
+    assert prompt.required == ["method", "target_stock", "qty_p100", "ending_p100"]
     assert "target_stock" in prompt.allowed
     banned = [k for k in prompt.allowed if k.startswith(("risk_", "dir_risk_")) or k in ("multiplier", "formula_desc")]
     assert not banned

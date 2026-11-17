@@ -71,6 +71,10 @@ ruff check .                     # 코드 검사
 
 ## 환경 변수
 
+모델 인사이트 계약과 연결 순서는 [결정 0018](docs/decisions/0018-model-insight-contract.md)을 따릅니다.
+`IPGO_MODEL_INSIGHT_ENABLED` 기본값은 `false`입니다. OFF이면 LGBM19 계산 결과의
+`insightInput`은 null이며 모델 설명 HTTP 호출도 차단합니다. 기존 A/B prompt와 위험 상태는 유지합니다.
+
 | 이름 | 설명 | 기본값 |
 |---|---|---|
 | `ENGINE_MODE` | `mock`이면 명세 예시 응답, `real`이면 실제 계산 | `mock` |
