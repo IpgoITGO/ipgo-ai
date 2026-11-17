@@ -64,8 +64,11 @@ def test_prompt_states_risk_is_not_computed_without_ab_wording():
     assert not banned
 
 
-def test_prompt_uses_only_listed_keys():
-    prompt = build_model_prompt(_input(start_stock_estimated=True, has_no_date_receipts=True,
+@pytest.mark.parametrize("scenarios", [
+    ("p80", "p100", "p120"), ("p100", "p120"), ("p100", "custom"), ("p100",),
+])
+def test_prompt_uses_only_listed_keys(scenarios):
+    prompt = build_model_prompt(_input(*scenarios, start_stock_estimated=True, has_no_date_receipts=True,
                                        extra=("as_of_date", "no_date_receipts")))
     assert set(PLACEHOLDER_RE.findall(prompt.user)) <= set(prompt.allowed)
 
@@ -106,9 +109,16 @@ def test_seller_checks_follow_metadata_flags():
 @pytest.mark.parametrize("inp", [
     pytest.param(dict(drop=("target_stock",)), id="목표 재고 없음"),
     pytest.param(dict(drop=("qty_p100",)), id="권장량 없음"),
+    pytest.param(dict(drop=("method",)), id="방식 이름 없음"),
+    pytest.param(dict(drop=("ending_p100",)), id="권장량 잔여 재고 없음"),
+    pytest.param(dict(drop=("ending_p80",)), id="80 시나리오 잔여 재고 없음"),
+    pytest.param(dict(drop=("ending_p120",)), id="120 시나리오 잔여 재고 없음"),
     pytest.param(dict(risk_status=RiskStatus.OK), id="위험 산출 상태"),
     pytest.param(dict(extra=("multiplier",)), id="여유 배수"),
     pytest.param(dict(extra=("risk_pre",)), id="위험 값"),
+    pytest.param(dict(directions={"risk_post_p80_vs_p100": "낮음"}), id="80 위험 방향"),
+    pytest.param(dict(directions={"risk_post_p120_vs_p100": "낮음"}), id="120 위험 방향"),
+    pytest.param(dict(directions={"risk_post_custom_vs_p100": "낮음"}), id="직접 입력 위험 방향"),
     pytest.param(dict(extra=("method_reason",), method_fallback=True), id="A · B 산식 사유"),
     pytest.param(dict(extra=("forecast_range_low", "forecast_range_high"), risk_status=RiskStatus.LOW_GRADE),
                  id="예상 출고량 범위"),
@@ -116,6 +126,11 @@ def test_seller_checks_follow_metadata_flags():
 def test_mixed_or_incomplete_input_is_rejected(inp):
     with pytest.raises(InsightInputError):
         build_model_prompt(_input(**inp))
+
+
+def test_custom_scenario_requires_ending_stock():
+    with pytest.raises(InsightInputError, match="ending_custom"):
+        build_model_prompt(_input("p100", "custom", drop=("ending_custom",)))
 
 
 def test_system_prompt_example_is_valid_json_with_three_sentences():

@@ -33,12 +33,18 @@ def _compare_scenario(keys: set[str]) -> str | None:
 def build_model_prompt(inp: InsightInput) -> Prompt:
     """예측 모델 결과의 InsightInput으로 prompt를 만든다. 값은 넣지 않는다."""
     given = set(inp.placeholders)
-    if MODEL_KEY not in given or "qty_p100" not in given:
-        raise InsightInputError("예측 모델 결과에는 목표 재고(target_stock)와 권장량(qty_p100)이 있어야 해요")
-    if inp.risk_status == RiskStatus.OK or any(k.startswith(BANNED_PREFIXES) or k in BANNED_KEYS for k in given):
-        raise InsightInputError("예측 모델 결과에는 위험 · 범위 · 여유 배수 자리 표시자를 보낼 수 없어요")
+    required = {MODEL_KEY, "method", "qty_p100"} | {
+        f"ending_{x}" for x in SCENARIOS if f"qty_{x}" in given
+    }
+    if missing := required - given:
+        raise InsightInputError("예측 모델 결과에 필요한 자리 표시자가 없어요: " + ", ".join(sorted(missing)))
     allowed = [k for k in allowed_keys(inp) if k not in BANNED_KEYS]
     keys = set(allowed)
+    # directions에서 생성된 위험 방향 키도 LLM에 전달하기 전에 거절한다.
+    if inp.risk_status == RiskStatus.OK or any(
+        k.startswith(BANNED_PREFIXES) or k in BANNED_KEYS for k in given | keys
+    ):
+        raise InsightInputError("예측 모델 결과에는 위험 · 범위 · 여유 배수 자리 표시자를 보낼 수 없어요")
     compare = _compare_scenario(keys)
 
     lines = [f"상품: {inp.sku_label}", "", "[입력 — 시나리오 결과 구조]", "계산 상태: NORMAL",
