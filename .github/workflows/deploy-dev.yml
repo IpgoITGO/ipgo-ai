@@ -22,6 +22,11 @@ on:
         required: false
         default: ""
         type: string
+      acceptance_timing_enabled:
+        description: "CALCULATE 단계 시간 로그 활성화(기본 꺼짐, 승인한 관측에만 사용)"
+        required: false
+        default: false
+        type: boolean
       continuous_llm_approved:
         description: "Approve ongoing LLM; Server monthly quota waiver needs separate explicit approval"
         required: false
@@ -300,6 +305,7 @@ jobs:
             IPGO_LLM_EXPIRES_AT=${{ inputs.llm_expires_at }}
             ENGINE_MODE=${{ inputs.engine_mode }}
             IPGO_EMBEDDED_WORKER_ENABLED=${{ inputs.embedded_worker_enabled }}
+            IPGO_ACCEPTANCE_TIMING_ENABLED=${{ inputs.acceptance_timing_enabled }}
       - name: Verify active template revisions before ECS writes
         timeout-minutes: 2
         run: python3 "$RUNNER_TEMP/verify_deployment.py" check-template --service ai

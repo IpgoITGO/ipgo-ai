@@ -13,6 +13,7 @@ import boto3
 from botocore.config import Config
 from pydantic import ValidationError
 
+from app import calculation_timing
 from app.config import get_settings
 from app.jobs import JobEnvelope, JobError, JobErrorDetails, JobStatus, JobType, ResultEnvelope, execute
 from app.result_transport import MAX_RESULT_BYTES as MAX_RESULT_BYTES
@@ -36,6 +37,7 @@ def _failure(job: JobEnvelope, code: str, message: str, reason: str | None = Non
 
 def process_message(body: str) -> ResultEnvelope:
     job = JobEnvelope.model_validate_json(body)
+    calculation_timing.identify(job)
     try:
         {JobType.CLEAN: CleanRequest, JobType.CALCULATE: CalculateRequest,
          JobType.BACKTEST: BacktestRequest}[job.job_type].model_validate(job.payload)
@@ -65,11 +67,15 @@ def create_worker():
 
 
 def run_loop(stop: threading.Event, settings, sqs) -> None:
+    timing_enabled = getattr(settings, "acceptance_timing_enabled", False)
+    if timing_enabled:
+        calculation_timing.configure_logging()
+    receive_options = {"MessageSystemAttributeNames": calculation_timing.SYSTEM_ATTRIBUTES} if timing_enabled else {}
     while not stop.is_set():
         try:
             response = sqs.receive_message(
                 QueueUrl=settings.jobs_queue_url, MaxNumberOfMessages=1,
-                WaitTimeSeconds=20,
+                WaitTimeSeconds=20, **receive_options,
             )
         except Exception:
             logger.warning("queue receive failed; retrying")
@@ -78,20 +84,29 @@ def run_loop(stop: threading.Event, settings, sqs) -> None:
         for message in response.get("Messages", []):
             if stop.is_set():
                 break
-            try:
-                result = process_message(message["Body"])
+            with calculation_timing.attempt(message.get("Attributes"), enabled=timing_enabled) as timing:
                 try:
-                    body = encode_result(result)
-                except ValueError:
-                    job = JobEnvelope.model_validate_json(message["Body"])
-                    result = _failure(job, "RESULT_TOO_LARGE", "결과가 너무 커서 처리할 수 없어요.")
-                    body = encode_result(result)
-                sqs.send_message(QueueUrl=settings.results_queue_url, MessageBody=body)
-                sqs.delete_message(QueueUrl=settings.jobs_queue_url, ReceiptHandle=message["ReceiptHandle"])
-            except ValidationError:
-                logger.error("invalid job envelope; leaving message for DLQ")
-            except Exception:
-                logger.error("engine job failed; leaving message for retry")
+                    with timing.phase("execution"):
+                        result = process_message(message["Body"])
+                    timing.outcome = "result_encoding_failed"
+                    try:
+                        body = encode_result(result)
+                    except ValueError:
+                        job = JobEnvelope.model_validate_json(message["Body"])
+                        result = _failure(job, "RESULT_TOO_LARGE", "결과가 너무 커서 처리할 수 없어요.")
+                        body = encode_result(result)
+                    timing.result_status = result.status.value
+                    timing.outcome = "publish_failed"
+                    with timing.phase("resultPublish"):
+                        sqs.send_message(QueueUrl=settings.results_queue_url, MessageBody=body)
+                    timing.outcome = "delete_failed"
+                    with timing.phase("messageDelete"):
+                        sqs.delete_message(QueueUrl=settings.jobs_queue_url, ReceiptHandle=message["ReceiptHandle"])
+                    timing.outcome = "success" if result.status is JobStatus.SUCCEEDED else "result_failed"
+                except ValidationError:
+                    logger.error("invalid job envelope; leaving message for DLQ")
+                except Exception:
+                    logger.error("engine job failed; leaving message for retry")
 
 
 def run() -> None:

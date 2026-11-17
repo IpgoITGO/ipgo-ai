@@ -171,6 +171,14 @@ DB 미설정은 계산 성공으로 대체하지 않습니다. DB 연결 제한�
   간 공유되지 않으므로 one-box에서는 API 프로세스 하나와 embedded worker 하나만 사용해야 합니다.
   한도 전체 조합이 256 MiB에서 안전하다고 검증한 것은 아닙니다.
 
+`IPGO_ACCEPTANCE_TIMING_ENABLED=true`는 CALCULATE 수신 시도마다 jobId/runId와
+DB 읽기·worker 실행·결과 발행 시간을 허용된 JSON 필드로 기록합니다(#121).
+기본은 꺼져 있으며 활성화·개발 배포는 별도 승인 대상입니다. 본문·상품·사용자·큐 주소·
+인증정보를 기록하지 않습니다. SQS 최초 대기와 재전달 이후 경과는 구분하며,
+현재 재전달의 대기 시간은 추측하지 않습니다. [필드와 측정 한계](docs/calculation-timing.md)를 따릅니다.
+one-box 개발 배포는 기존 workflow의 `acceptance_timing_enabled` 입력으로 켜고 끕니다.
+기본 `false`이며 승인한 관측에만 `true`, 복구할 때는 같은 경로에 `false`를 명시합니다.
+
 worker는 `ENGINE_MODE`와 관계없이 실제 엔진을 호출합니다. `IPGO_EMBEDDED_WORKER_ENABLED=true`면
 API에 worker thread를 띄우고 두 SQS queue URL이 필요합니다. `/health`의 mode는 HTTP 설정을 뜻하며,
 embedded worker가 비정상 종료되면 health가 503입니다. worker는 결과 발행 후 메시지를 삭제하므로
