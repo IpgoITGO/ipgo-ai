@@ -41,7 +41,9 @@ real engineVersion은0.6.0입니다. mock 응답은 기존 계약의 정적 예�
 Python 3.14가 필요합니다.
 
 DA-01 로컬 Server·worker 연동은 [로컬 worker 실행 안내](docs/local-worker.md)를 따릅니다.
-시험용 설정 예시와 오프라인 검증을 제공하며, 실제 DB·브로커 구축과 Server 저장 검증은 별도입니다.
+빈 DB의 role·migration·view, 독립 브로커·큐·원본 mount부터 검증·중지까지 안내합니다.
+독립 로컬 r4의 실제 worker·Spring DONE/FAILED와 UI2 후검증 근거를 구분해 기록했습니다.
+실제 AWS와 유료 LLM은 이 로컬 수용 범위에 포함하지 않습니다.
 
 ```bash
 python3.14 -m venv .venv && source .venv/bin/activate
