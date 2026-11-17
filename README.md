@@ -1,5 +1,8 @@
 # Ipgo AI
 
+AI-01·AI-02의14개 실패·대체 경계와 실제 수용/재생/비적용 범위는
+[시나리오 수용 기록](docs/ai-insight/failure-scenarios-acceptance-2026-11-18.md)을 따릅니다.
+
 고정19일 LightGBM/BUFFER100_FLOOR0은 명시적인 LGBM19 요청과 비공개 모델 bundle로 연결합니다. 입력·보정·버전·미산출 평가·이미지 준비/복구는 [모델 연결 계약](docs/model19-integration.md)을 따릅니다. ARM 사전 빌드 이미지의 실제 `uvicorn` 실행과 모델 로딩을 확인한 뒤 ECS를 변경합니다. 코드/로컬 검증과 실제 AWS 배포는 구분합니다.
 
 모델이 NaN·무한대 또는 잘못된 크기의 예측을 반환하면 해당 상품을 `NOT_CALCULABLE`로
