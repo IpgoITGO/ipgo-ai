@@ -87,6 +87,19 @@ def test_banned_phrase(phrase, code):
     assert code in result.codes
 
 
+@pytest.mark.parametrize("phrase", ["300개로 권장량 대비", "{{qty_p80}}개로 권장량 대비 수량을 {{action_p80}}"])
+def test_recommended_qty_as_comparison_base_is_not_a_change_proposal(phrase):
+    # #122: "N개로 권장량 대비"는 권장량을 비교 기준으로 부른 것이다. "N개로 권장"(제안)과 구분한다.
+    result = _check(PASS.replace("수량과 관계없이", f"수량과 관계없이 {phrase}"))
+    assert "banned_word" not in result.codes
+
+
+@pytest.mark.parametrize("phrase", ["300개로 권장량을 변경", "300개로 권장합니다", "300개로 추천"])
+def test_change_proposal_next_to_recommended_qty_is_still_blocked(phrase):
+    result = _check(PASS.replace("수량과 관계없이", f"수량과 관계없이 {phrase}"))
+    assert "banned_word" in result.codes
+
+
 @pytest.mark.parametrize(
     ("old", "new", "code"),
     [
