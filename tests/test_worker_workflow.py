@@ -87,3 +87,15 @@ def test_continuous_requires_cost_approval_but_no_demo_deadline():
     assert gate(**(real | {'LLM_APPROVED':'false'})) != 0
     assert gate(**(real | {'LLM_ENABLED':'false'})) != 0
     assert gate(**(real | {'CONTINUOUS_LLM_APPROVED':'false'})) != 0
+
+
+def test_acceptance_timing_is_opt_in_and_api_render_supports_on_and_off():
+    document = workflow()
+    # PyYAML의 YAML 1.1 loader는 GitHub의 on 키를 True로 읽는다.
+    trigger = document.get('on', document.get(True))
+    option = trigger['workflow_dispatch']['inputs']['acceptance_timing_enabled']
+    assert option['type'] == 'boolean' and option['default'] is False and option['required'] is False
+    render = next(s for s in document['jobs']['deploy']['steps'] if s.get('id') == 'render-api')
+    line, = [s for s in render['with']['environment-variables'].splitlines()
+             if s.startswith('IPGO_ACCEPTANCE_TIMING_ENABLED=')]
+    assert line == 'IPGO_ACCEPTANCE_TIMING_ENABLED=${{ inputs.acceptance_timing_enabled }}'

@@ -20,6 +20,7 @@ class Settings:
     model19_directory: str = ""
     risk_enabled: bool = True
     original_database_url: str | None = None
+    acceptance_timing_enabled: bool = False
 
 
 def get_settings() -> Settings:
@@ -36,4 +37,5 @@ def get_settings() -> Settings:
         results_queue_url=os.getenv("IPGO_RESULTS_QUEUE_URL") or None,
         risk_enabled=os.getenv("IPGO_RISK_ENABLED", "true").lower() == "true",
         original_database_url=os.getenv("IPGO_ORIGINAL_DATABASE_URL") or None,
+        acceptance_timing_enabled=os.getenv("IPGO_ACCEPTANCE_TIMING_ENABLED", "false").lower() == "true",
     )

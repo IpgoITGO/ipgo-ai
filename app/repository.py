@@ -4,6 +4,7 @@ import hashlib
 import pandas as pd
 import psycopg
 
+from app.calculation_timing import database_read_timed
 from app.config import get_settings
 from app.errors import AppError
 
@@ -132,6 +133,7 @@ def load_cleaning_context(user_id: int, warehouse_id: int, upload_id: int,
     except psycopg.Error as exception:
         raise AppError(503, "DATABASE_UNAVAILABLE", "정제 데이터를 읽지 못했어요") from exception
 
+@database_read_timed
 def load_product_daily(warehouse_id: int, upload_file_ids: list[int], *, user_id: int) -> pd.DataFrame:
     """지정한 source만 읽는다. NUMERIC 수량은 엔진의 float로 받아 Python Decimal 객체 누적을 피한다."""
     settings = get_settings()
