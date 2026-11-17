@@ -1,6 +1,7 @@
 """HTTP와 SQS의 공통 계산 경로. 읽기 권한을 확인한 동일 DataFrame만 표본과 계산에 사용한다."""
 import pandas as pd
 
+from app.config import get_settings
 from app.risk_policy import load_risk_policy
 from app.source_digest import source_digest
 from engine import calculate as core
@@ -32,7 +33,8 @@ def calculate(request: CalculateRequest, daily: pd.DataFrame) -> CalculateRespon
     """업로드 snapshot의 TUNE 표본을 준비해 DA07과 기존 수량 계산에 연결한다."""
     try:
         context = _context(request, daily)
-        response = core.calculate(request, daily, risk_context=context, model_bundle=_model_bundle(request))
+        response = core.calculate(request, daily, risk_context=context, model_bundle=_model_bundle(request),
+                                  model_insight_enabled=get_settings().model_insight_enabled)
         if request.policy.default_method is Method.LGBM19:
             response.engine_version += "+lgbm19"
         # 선택 source·기준일 범위와 v1 지문 계약은 유지한다.

@@ -6,7 +6,7 @@ import math
 from datetime import date
 from typing import Literal
 
-from schemas.base import ResultStatus, RiskStatus, ScenarioType
+from schemas.base import Method, ResultStatus, RiskStatus, ScenarioType
 from schemas.engine import ProductResult, ScenarioResult
 from schemas.insight import InsightInput
 
@@ -28,14 +28,21 @@ def _described(result: ProductResult) -> list[ScenarioResult]:
     return [by_type[kind] for kind in ScenarioType if kind in by_type and not by_type[kind].is_duplicate]
 
 
-def build_catalog(result: ProductResult, *, as_of_date: date | None = None) -> list[str]:
+def build_catalog(result: ProductResult, *, as_of_date: date | None = None,
+                  model_insight_enabled: bool = False) -> list[str]:
     """값이 있는 키 이름만 만든다 (prompt 문서5/5-1). 필수 사실이 없으면 빈 목록이다.
 
     † 문구 키(label/action/dir/formula_desc/risk_basis)는 FastAPI가 유도하며 여기에는 넣지 않는다.
     소진일 None은 '기간 안에 소진되지 않음'이라는 계산 사실이므로 depletion 키를 제공한다.
     """
-    if (result.status != ResultStatus.OK or result.risk_status is None or result.method is None
-            or result.method_fallback is None or not _number(result.recommended_qty, positive=True)):
+    model = result.method == Method.LGBM19
+    if model and not model_insight_enabled:
+        return []
+    if (result.status != ResultStatus.OK or (result.risk_status is None and not model) or result.method is None
+            or (result.method_fallback is None and not model) or not _number(result.recommended_qty, positive=True)):
+        return []
+    if model and (result.risk_status is not None or result.method_fallback or not _number(result.target_stock_qty)
+                  or result.model_fallback):
         return []
     scenarios = _described(result)
     if not scenarios:
@@ -46,6 +53,8 @@ def build_catalog(result: ProductResult, *, as_of_date: date | None = None) -> l
         return []
 
     keys = ["method"]
+    if model:
+        keys.append("target_stock")
     if result.method_fallback:
         keys.append("method_reason")
     for key, value in (
@@ -53,6 +62,8 @@ def build_catalog(result: ProductResult, *, as_of_date: date | None = None) -> l
         ("planned_receipts", result.planned_receipts_in_horizon),
         ("forecast_outbound", result.forecast_outbound_qty), ("multiplier", result.multiplier),
     ):
+        if model and key == "multiplier":
+            continue
         if value is not None:
             if not _number(value, positive=key in {"horizon_days", "multiplier"}):
                 return []
@@ -102,6 +113,7 @@ def _percent(value: float) -> int:
 
 def to_insight_input(
     result: ProductResult, sku_label: str, *, as_of_date: date | None = None,
+    model_insight_enabled: bool = False,
 ) -> InsightInput | None:
     """완전한 OK 결과만 변환한다. sku_label은 호출자가 만든 별칭이며 실제 상품명을 주지 않는다.
 
@@ -110,7 +122,7 @@ def to_insight_input(
     """
     if not sku_label.strip():
         return None
-    keys = build_catalog(result, as_of_date=as_of_date)
+    keys = build_catalog(result, as_of_date=as_of_date, model_insight_enabled=model_insight_enabled)
     if not keys:
         return None
     scenarios = _described(result)
@@ -129,8 +141,10 @@ def to_insight_input(
                 _percent(scenario.post_arrival_risk), _percent(base.post_arrival_risk),
             )
     return InsightInput(
-        sku_label=sku_label, recommended=ScenarioType.P100, risk_status=result.risk_status,
+        sku_label=sku_label, recommended=ScenarioType.P100,
+        risk_status="NOT_COMPUTED" if result.method == Method.LGBM19 else result.risk_status,
+        method=Method.LGBM19 if result.method == Method.LGBM19 else None,
         placeholders=keys, directions=directions, scenarios=[s.type for s in scenarios],
-        method_fallback=result.method_fallback, start_stock_estimated=result.start_stock_estimated,
+        method_fallback=bool(result.method_fallback), start_stock_estimated=result.start_stock_estimated,
         has_no_date_receipts=result.no_date_receipt_qty > 0,
     )

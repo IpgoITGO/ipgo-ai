@@ -1,23 +1,23 @@
 """AI-01 예측 모델(LGBM19) 결과용 prompt 준비 (#122). 기존 A · B prompt(insight/prompt.py)와 따로 둔다.
 
-- 아직 어디에서도 부르지 않는다. 모델 결과의 설명은 미생성이 현재 결정이다 (#122, PR #128).
+- 서비스 연결은 IPGO_MODEL_INSIGHT_ENABLED 스위치로 제어한다. 기본은 비활성이다.
 - 지침 글은 insight/model_system_prompt.txt. 바꾸면 MODEL_PROMPT_VERSION을 올리고 다시 측정한다.
 - 값은 보내지 않는다. 자리 표시자 이름과 설명만 보낸다 (AI-03).
 - 품절 위험은 이 방식에서 산출하지 않는다. '표본 부족'으로 쓰지 않는다 (docs/model19-integration.md).
-- 입력 계약에 모델 표시 값이 정해지기 전이라, 목표 재고 자리 표시자(target_stock)가 있는 입력만 받는다.
+- method=LGBM19, riskStatus=NOT_COMPUTED와 목표 재고 키가 있는 입력만 받는다.
 """
 from pathlib import Path
 
 from insight.prompt import KEY_DESCRIPTIONS, SCENARIOS, InsightInputError, Prompt, allowed_keys
-from schemas.base import RiskStatus
+from schemas.base import Method
 from schemas.insight import InsightInput
 
-MODEL_PROMPT_VERSION = "model-prompt-2026.11.17-v0.1-local"
+MODEL_PROMPT_VERSION = "model-prompt-2026.11.17-v0.2"
 MODEL_SYSTEM_PROMPT = (Path(__file__).parent / "model_system_prompt.txt").read_text(encoding="utf-8").rstrip("\n")
 
 MODEL_KEY = "target_stock"
 MODEL_KEY_DESCRIPTIONS = KEY_DESCRIPTIONS | {
-    MODEL_KEY: "예측 모델이 정한 목표 재고(개, 안전 여유 포함)",
+    MODEL_KEY: "예측 모델이 정한 목표 재고(개). 품절 방지 확률을 뜻하지 않음",
     "method": "적용한 예측 방식 이름",
     "forecast_outbound": "커버 기간 예상 출고량(개)",
 }
@@ -33,6 +33,8 @@ def _compare_scenario(keys: set[str]) -> str | None:
 def build_model_prompt(inp: InsightInput) -> Prompt:
     """예측 모델 결과의 InsightInput으로 prompt를 만든다. 값은 넣지 않는다."""
     given = set(inp.placeholders)
+    if inp.method != Method.LGBM19 or inp.risk_status != "NOT_COMPUTED" or inp.method_fallback:
+        raise InsightInputError("예측 모델 방식과 위험 미산출 상태가 필요해요")
     required = {MODEL_KEY, "method", "qty_p100"} | {
         f"ending_{x}" for x in SCENARIOS if f"qty_{x}" in given
     }
@@ -41,7 +43,7 @@ def build_model_prompt(inp: InsightInput) -> Prompt:
     allowed = [k for k in allowed_keys(inp) if k not in BANNED_KEYS]
     keys = set(allowed)
     # directions에서 생성된 위험 방향 키도 LLM에 전달하기 전에 거절한다.
-    if inp.risk_status == RiskStatus.OK or any(
+    if any(
         k.startswith(BANNED_PREFIXES) or k in BANNED_KEYS for k in given | keys
     ):
         raise InsightInputError("예측 모델 결과에는 위험 · 범위 · 여유 배수 자리 표시자를 보낼 수 없어요")
@@ -72,4 +74,15 @@ def build_model_prompt(inp: InsightInput) -> Prompt:
     lines += ["", "[자리 표시자 목록 — 이 목록만 사용]"]
     lines += [f"  {{{{{k}}}}} — {MODEL_KEY_DESCRIPTIONS.get(k, '계산 결과 값')}" for k in allowed]
     lines += ["", '위 규칙에 따라 {"sentences": [...]} JSON 으로 AI 인사이트 문장을 작성하세요.']
-    return Prompt(MODEL_SYSTEM_PROMPT, "\n".join(lines), allowed, ["qty_p100"])
+    required_keys = ["method", "target_stock", "qty_p100", "ending_p100"]
+    if inp.start_stock_estimated and {"start_stock", "as_of_date"} <= keys:
+        required_keys += ["start_stock", "as_of_date"]
+    if inp.has_no_date_receipts and "no_date_receipts" in keys:
+        required_keys.append("no_date_receipts")
+    return Prompt(MODEL_SYSTEM_PROMPT, "\n".join(lines), allowed, required_keys)
+
+
+def model_draft_valid(text: str) -> bool:
+    """규칙 통과와 별개로 잘못된 위험 사유·A/B 설명을 차단한다. 수치 검사는 공통 validator 책임이다."""
+    return ("이 예측 방식에서는 품절 위험을 산출하지 않았습니다" in text
+            and not any(word in text for word in ("표본", "계산식", "여유 배수", "확률", "P90", "백분위")))

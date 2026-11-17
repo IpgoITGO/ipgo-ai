@@ -307,3 +307,28 @@ prompt에는 입력 상태에 맞는 예시 하나를 따르라고 적고 세 �
 - mock `insight.json` 초안의 방향 표현: mock 갱신은 #10에서 합니다.
 - 참조 구현과의 차이: 위험 미산출 문장을 한 번만 쓰고, 산출 불가 문장을 상태별로 나누고, 확인 필요 조각을 추가했습니다. 직접 입력 전용 문장은 뺐고, 미반영 물량 문장은 6장 7번으로 되살렸습니다. 전체 상품 표본은 `{{risk_basis}}`로 밝힙니다.
 - 상태별 prompt, 필드 의미(`plannedReceiptsInHorizon`, `forecastRangeLow/High`), `LOW_GRADE`일 때 도착 전 위험, `REUPLOAD_REQUIRED` 처리는 #32 · 0002 3-8 · 4장에서 정해 반영했습니다.
+# 모델 전용 연결과 기본 문장 (#122)
+
+기존 A/B prompt와 PROMPT_VERSION은 그대로 유지한다. 모델 요청은 method=LGBM19,
+riskStatus=NOT_COMPUTED, target_stock 키로 구분한다. 계산 결과의 riskStatus는 null이다.
+기본 스위치는 OFF이며 연결 코드의 존재가 개발 환경 활성화를 뜻하지 않는다.
+
+모델 첫 문장은 목표 재고·권장량·다음 입고 때 잔여 재고를 설명한다. 이어 P80→P120→CUSTOM
+순서로 중복이 아닌 비교 하나를 고르고, 마지막은 `이 예측 방식에서는 품절 위험을 산출하지 않았습니다.`다.
+추정 재고와 도착일 없는 발주가 있으면 마지막 문장의 괄호로 사실만 알린다.
+목표 재고는 품절 방지 확률이 아니며 A/B 표본·산식·여유 배수·표본 부족 사유를 쓰지 않는다.
+
+Spring 모델 기본 문장 기준은 다음과 같고 `tests.insight_fallback.build_model_fallback`이
+격리 검증용 기준이다. 기존 build_fallback과 A/B 평가의 모델 미생성 기본 동작은 유지한다.
+
+```text
+{{method}}의 목표 재고 {{target_stock}}개와 현재 재고 {{start_stock}}개, 도착 예정 물량 {{planned_receipts}}개를 반영한 권장 입고량은 {{qty_p100}}개이며, 다음 입고 때 {{ending_p100}}개가 남습니다.
+{{label_X}}인 {{qty_X}}개로 {{action_X}} 다음 입고 때 남는 재고는 {{ending_X}}개로 {{dir_ending_X_end}}.
+이 예측 방식에서는 품절 위험을 산출하지 않았습니다.
+```
+
+둘째 조각은 중복 아닌 P80/P120마다 쓴다. 직접 수량 시나리오의 계산 저장·UI 계약은 기존대로다.
+미산출·입고 불필요·미지원 상품은 LLM 생성 성공 수에 넣지 않는다. timeout/error·검사 실패는
+모델 전용 기본 문장으로 대체하며, 값이 없어 기본 문장도 만들 수 없으면 TABLE_ONLY다.
+활성화 검증은 실제 weight의 양수 권장량, 중복 P80, 추정 재고/날짜 없는 발주, 오류 대체,
+기존 A/B 회귀를 구분한다. 유료 호출의 합성 입력/실제 엔진 출처와 사용량·추정 비용을 따로 남긴다.

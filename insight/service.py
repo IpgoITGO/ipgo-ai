@@ -7,17 +7,20 @@
 import logging
 
 from insight.llm import LLMClient, LLMError, LLMResult
+from insight.model_prompt import MODEL_PROMPT_VERSION, build_model_prompt, model_draft_valid
 from insight.prompt import PROMPT_VERSION, build_prompt, draft_text
 from insight.validator import check_draft
+from schemas.base import Method
 from schemas.insight import FailReason, InsightInput, InsightResponse, Validation
 
 logger = logging.getLogger(__name__)
 
 
-def _failed(reason: FailReason, latency_ms: int, result: LLMResult | None = None) -> InsightResponse:
+def _failed(reason: FailReason, latency_ms: int, result: LLMResult | None = None,
+            *, version: str = PROMPT_VERSION) -> InsightResponse:
     # Only a received provider result can supply actual model and usage.
     return InsightResponse(validation=Validation.FAILED, draft=None, fail_reason=reason,
-                           latency_ms=latency_ms, prompt_version=PROMPT_VERSION, **_metadata(result))
+                           latency_ms=latency_ms, prompt_version=version, **_metadata(result))
 
 
 def _metadata(result: LLMResult | None) -> dict:
@@ -29,23 +32,27 @@ def _metadata(result: LLMResult | None) -> dict:
 
 def generate_insight(inp: InsightInput, client: LLMClient) -> InsightResponse:
     """InsightInput 하나로 자리 표시자 문장 초안을 만들고 검사한다. 입력이 잘못되면 InsightInputError."""
-    prompt = build_prompt(inp)
+    model = inp.method == Method.LGBM19
+    version = MODEL_PROMPT_VERSION if model else PROMPT_VERSION
+    prompt = build_model_prompt(inp) if model else build_prompt(inp)
     try:
         r = client.complete(prompt.system, prompt.user)
     except LLMError as e:
-        logger.warning("insight failed reason=%s latency_ms=%d prompt=%s", e.reason.value, e.latency_ms, PROMPT_VERSION)
-        return _failed(e.reason, e.latency_ms, None)
+        logger.warning("insight failed reason=%s latency_ms=%d prompt=%s", e.reason.value, e.latency_ms, version)
+        return _failed(e.reason, e.latency_ms, None, version=version)
 
     text = None if r.truncated else draft_text(r.text)
     detail = "truncated" if r.truncated else "format"
     if text is not None:
         result = check_draft(text, prompt.allowed, prompt.required)
         detail = None if result.ok else result.violations[0].code
+        if detail is None and model and not model_draft_valid(text):
+            detail = "model_semantics"
     log = logger.info if detail is None else logger.warning
     log("insight %s detail=%s model=%s latency_ms=%d tokens=%s/%s cost_usd=%s prompt=%s",
         "passed" if detail is None else "failed", detail, r.model, r.latency_ms,
-        r.input_tokens, r.output_tokens, r.cost_usd, PROMPT_VERSION)
+        r.input_tokens, r.output_tokens, r.cost_usd, version)
     if detail is not None:
-        return _failed(FailReason.VALIDATION_FAILED, r.latency_ms, r)
+        return _failed(FailReason.VALIDATION_FAILED, r.latency_ms, r, version=version)
     return InsightResponse(validation=Validation.PASSED, draft=text, fail_reason=None,
-                           latency_ms=r.latency_ms, prompt_version=PROMPT_VERSION, **_metadata(r))
+                           latency_ms=r.latency_ms, prompt_version=version, **_metadata(r))

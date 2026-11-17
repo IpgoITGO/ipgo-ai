@@ -1,0 +1,187 @@
+{
+  "provenance": "고정 LGBM19 weight + 합성 수불부의 이름 목록. 수불부·상품 대응값·실제 수치는 제외",
+  "cases": [
+    {
+      "id": "positive",
+      "input": {
+        "skuLabel": "이 상품",
+        "recommended": "P100",
+        "placeholders": [
+          "method",
+          "target_stock",
+          "horizon_days",
+          "start_stock",
+          "planned_receipts",
+          "forecast_outbound",
+          "qty_p100",
+          "depletion_p100",
+          "ending_p100",
+          "unmet_p100",
+          "qty_p120",
+          "depletion_p120",
+          "ending_p120",
+          "unmet_p120",
+          "diff_p120"
+        ],
+        "directions": {
+          "ending_p120_vs_p100": "높음"
+        },
+        "riskStatus": "NOT_COMPUTED",
+        "method": "LGBM19",
+        "scenarios": [
+          "P100",
+          "P120"
+        ],
+        "methodFallback": false,
+        "startStockEstimated": false,
+        "hasNoDateReceipts": false
+      }
+    },
+    {
+      "id": "p80_duplicate",
+      "input": {
+        "skuLabel": "이 상품",
+        "recommended": "P100",
+        "placeholders": [
+          "method",
+          "target_stock",
+          "horizon_days",
+          "start_stock",
+          "planned_receipts",
+          "forecast_outbound",
+          "qty_p100",
+          "depletion_p100",
+          "ending_p100",
+          "unmet_p100",
+          "qty_p120",
+          "depletion_p120",
+          "ending_p120",
+          "unmet_p120",
+          "diff_p120"
+        ],
+        "directions": {
+          "ending_p120_vs_p100": "높음"
+        },
+        "riskStatus": "NOT_COMPUTED",
+        "method": "LGBM19",
+        "scenarios": [
+          "P100",
+          "P120"
+        ],
+        "methodFallback": false,
+        "startStockEstimated": false,
+        "hasNoDateReceipts": false
+      }
+    },
+    {
+      "id": "estimated_and_undated",
+      "input": {
+        "skuLabel": "이 상품",
+        "recommended": "P100",
+        "placeholders": [
+          "method",
+          "target_stock",
+          "horizon_days",
+          "start_stock",
+          "planned_receipts",
+          "forecast_outbound",
+          "as_of_date",
+          "no_date_receipts",
+          "qty_p100",
+          "depletion_p100",
+          "ending_p100",
+          "unmet_p100",
+          "qty_p120",
+          "depletion_p120",
+          "ending_p120",
+          "unmet_p120",
+          "diff_p120"
+        ],
+        "directions": {
+          "ending_p120_vs_p100": "높음"
+        },
+        "riskStatus": "NOT_COMPUTED",
+        "method": "LGBM19",
+        "scenarios": [
+          "P100",
+          "P120"
+        ],
+        "methodFallback": false,
+        "startStockEstimated": true,
+        "hasNoDateReceipts": true
+      }
+    },
+    {
+      "id": "planned_receipt",
+      "input": {
+        "skuLabel": "이 상품",
+        "recommended": "P100",
+        "placeholders": [
+          "method",
+          "target_stock",
+          "horizon_days",
+          "start_stock",
+          "planned_receipts",
+          "forecast_outbound",
+          "qty_p100",
+          "depletion_p100",
+          "ending_p100",
+          "unmet_p100",
+          "qty_p120",
+          "depletion_p120",
+          "ending_p120",
+          "unmet_p120",
+          "diff_p120"
+        ],
+        "directions": {
+          "ending_p120_vs_p100": "높음"
+        },
+        "riskStatus": "NOT_COMPUTED",
+        "method": "LGBM19",
+        "scenarios": [
+          "P100",
+          "P120"
+        ],
+        "methodFallback": false,
+        "startStockEstimated": false,
+        "hasNoDateReceipts": false
+      }
+    },
+    {
+      "id": "stock_on_hand",
+      "input": {
+        "skuLabel": "이 상품",
+        "recommended": "P100",
+        "placeholders": [
+          "method",
+          "target_stock",
+          "horizon_days",
+          "start_stock",
+          "planned_receipts",
+          "forecast_outbound",
+          "qty_p100",
+          "depletion_p100",
+          "ending_p100",
+          "unmet_p100",
+          "qty_p120",
+          "depletion_p120",
+          "ending_p120",
+          "unmet_p120",
+          "diff_p120"
+        ],
+        "directions": {
+          "ending_p120_vs_p100": "높음"
+        },
+        "riskStatus": "NOT_COMPUTED",
+        "method": "LGBM19",
+        "scenarios": [
+          "P100",
+          "P120"
+        ],
+        "methodFallback": false,
+        "startStockEstimated": false,
+        "hasNoDateReceipts": false
+      }
+    }
+  ]
+}

@@ -109,16 +109,21 @@ def _key(s: ScenarioResult) -> str:
     return s.type.value.lower()
 
 
-def placeholder_values(r: ProductResult, ctx: Context) -> dict[str, str]:
+def placeholder_values(r: ProductResult, ctx: Context, *, model_insight_enabled: bool = False) -> dict[str, str]:
     """6장 조각에 들어가는 자리 표시자 값. 값이 없는 항목은 넣지 않는다 (#4 문서 5장)."""
     # #122: LGBM19는 A/B 산식·배수 기반 문장의 대상이 아니다. 설명은 활성화하지 않는다.
-    if r.method == Method.LGBM19:
+    if r.method == Method.LGBM19 and not model_insight_enabled:
         return {}
     v: dict[str, str] = {}
     if r.reason:
         v["reason"] = r.reason.strip().rstrip(".")
     if r.method is not None:
-        v["method"], v["formula_desc"] = f"계산식 {r.method.value}", FORMULA_DESC[r.method]
+        if r.method == Method.LGBM19:
+            v["method"] = "예측 모델"
+            if r.target_stock_qty is not None:
+                v["target_stock"] = _demand(r.target_stock_qty)
+        else:
+            v["method"], v["formula_desc"] = f"계산식 {r.method.value}", FORMULA_DESC[r.method]
     if ctx.method_fallback and r.method_reason:
         v["method_reason"] = r.method_reason.strip().rstrip(".")
     for key, x in (("horizon_days", r.horizon_days), ("planned_receipts", r.planned_receipts_in_horizon)):
@@ -128,7 +133,7 @@ def placeholder_values(r: ProductResult, ctx: Context) -> dict[str, str]:
         v["forecast_outbound"] = _demand(r.forecast_outbound_qty)
     if r.start_stock_qty is not None:
         v["start_stock"] = _stock(r.start_stock_qty)
-    if r.multiplier is not None:
+    if r.multiplier is not None and r.method != Method.LGBM19:
         v["multiplier"] = _pct(r.multiplier)
     if ctx.no_date_receipt_qty > 0:
         v["no_date_receipts"] = _int(ctx.no_date_receipt_qty)
@@ -150,6 +155,9 @@ def placeholder_values(r: ProductResult, ctx: Context) -> dict[str, str]:
     base = next((s for s in described if s.type == ScenarioType.P100), None)
     for s in described:
         x = _key(s)
+        if r.method == Method.LGBM19:
+            v[f"label_{x}"] = {"p80": "권장량의 80%", "p100": "권장량",
+                                "p120": "권장량의 120%", "custom": "직접 입력한 수량"}[x]
         v[f"qty_{x}"], v[f"ending_{x}"] = _int(s.qty), _stock(s.expected_ending_stock)
         if risk and s.post_arrival_risk is not None:
             v[f"risk_post_{x}"] = _pct(s.post_arrival_risk)
@@ -204,6 +212,32 @@ def build_fallback(r: ProductResult, ctx: Context | None = None) -> Fallback | N
     ctx = ctx or Context()
     template = fallback_template(r, ctx)
     values = placeholder_values(r, ctx)
+    try:
+        return Fallback(template, [fill(t, values) for t in template])
+    except KeyError:
+        return None
+
+
+def build_model_fallback(r: ProductResult, ctx: Context | None = None) -> Fallback | None:
+    """#122 격리 검증용 모델 조각. 기본 build_fallback의 미생성 결정과 구분한다."""
+    if r.method != Method.LGBM19 or r.status != ResultStatus.OK or r.risk_status is not None or r.model_fallback:
+        return None
+    ctx = ctx or Context()
+    values = placeholder_values(r, ctx, model_insight_enabled=True)
+    template = ["{{method}}의 목표 재고 {{target_stock}}개와 현재 재고 {{start_stock}}개, "
+                "도착 예정 물량 {{planned_receipts}}개를 반영한 권장 입고량은 {{qty_p100}}개이며, "
+                "다음 입고 때 {{ending_p100}}개가 남습니다."]
+    for s in r.scenarios:
+        if s.type == ScenarioType.P100 or s.is_duplicate:
+            continue
+        x = _key(s)
+        template.append(("{{label_X}}인 {{qty_X}}개로 {{action_X}} 다음 입고 때 남는 재고는 "
+                         "{{ending_X}}개로 {{dir_ending_X_end}}.").replace("_X", "_" + x))
+    template.append("이 예측 방식에서는 품절 위험을 산출하지 않았습니다.")
+    if ctx.no_date_receipt_qty > 0:
+        template.append("도착 예정일 없는 발주 {{no_date_receipts}}개는 계산에 넣지 않았습니다.")
+    if r.start_stock_estimated:
+        template.append("현재 재고 {{start_stock}}개는 기준일 {{as_of_date}} 이후 출고를 예측한 추정값입니다.")
     try:
         return Fallback(template, [fill(t, values) for t in template])
     except KeyError:

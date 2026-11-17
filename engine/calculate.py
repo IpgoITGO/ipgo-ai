@@ -275,7 +275,7 @@ def _apply_accuracy(result, request, settings, context, indexed, selector=None):
 
 def calculate(
     request: CalculateRequest, product_daily: pd.DataFrame, *, risk_context: RiskContext | None = None,
-    model_bundle=None,
+    model_bundle=None, model_insight_enabled: bool = False,
 ) -> CalculateResponse:
     """D=g+H일 예측에서 H일 필요량(개)을 구하고, 권장량의 80/100/120%를 입고 단위로 올려 비교한다."""
     if request.policy.default_method is Method.LGBM19:
@@ -310,7 +310,9 @@ def calculate(
                 ))
         _apply_accuracy(result, request, config, risk_context, indexed, selector)
         _apply_risk(result, request, sku_daily, config, planned, risk_context, selector)
-        result.insight_input = to_insight_input(result, "이 상품", as_of_date=request.as_of_date)
+        if result.method != Method.LGBM19 or model_insight_enabled:
+            result.insight_input = to_insight_input(result, "이 상품", as_of_date=request.as_of_date,
+                                                   model_insight_enabled=model_insight_enabled)
         results.append(result)
     return CalculateResponse(engine_version=ENGINE_VERSION, results=results)
 

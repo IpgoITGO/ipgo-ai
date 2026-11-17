@@ -21,6 +21,7 @@ class Settings:
     risk_enabled: bool = True
     original_database_url: str | None = None
     acceptance_timing_enabled: bool = False
+    model_insight_enabled: bool = False
 
 
 def get_settings() -> Settings:
@@ -38,4 +39,5 @@ def get_settings() -> Settings:
         risk_enabled=os.getenv("IPGO_RISK_ENABLED", "true").lower() == "true",
         original_database_url=os.getenv("IPGO_ORIGINAL_DATABASE_URL") or None,
         acceptance_timing_enabled=os.getenv("IPGO_ACCEPTANCE_TIMING_ENABLED", "false").lower() == "true",
+        model_insight_enabled=os.getenv("IPGO_MODEL_INSIGHT_ENABLED", "false").lower() == "true",
     )
