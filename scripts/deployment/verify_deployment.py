@@ -311,8 +311,8 @@ def check_onebox_ai_policy(env, current, read):
         and definition.get("requiresCompatibilities") == ["EC2"]
         and platform.get("cpuArchitecture") == "ARM64"
         and platform.get("operatingSystemFamily") == "LINUX"
-        and definition.get("memory") == "256"
-        and container.get("memory") == 256
+        and definition.get("memory") == "512"
+        and container.get("memory") == 512
         and ports[0].get("containerPort") == 8000
         and ports[0].get("hostPort") == 18000
         and ports[0].get("protocol") == "tcp",
