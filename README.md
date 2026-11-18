@@ -77,6 +77,9 @@ ruff check .                     # 코드 검사
 모델 인사이트 계약과 연결 순서는 [결정 0018](docs/decisions/0018-model-insight-contract.md)을 따릅니다.
 `IPGO_MODEL_INSIGHT_ENABLED` 기본값은 `false`입니다. OFF이면 LGBM19 계산 결과의
 `insightInput`은 null이며 모델 설명 HTTP 호출도 차단합니다. 기존 A/B prompt와 위험 상태는 유지합니다.
+개발 배포의 `model_insight_enabled` 입력은 기본 `false`입니다. ON은 비공개 모델19 이미지와
+명시적 LLM 비용 승인을 요구하며 Server의 같은 입력도 함께 켜야 합니다. 문제 시 두 입력을
+`false`로 재배포합니다. 앱 SHA와 모델 weight를 바꾸지 않고 스위치만 변경할 수 있습니다.
 
 | 이름 | 설명 | 기본값 |
 |---|---|---|
