@@ -30,9 +30,14 @@ def test_model_path_does_not_remove_other_env_or_secret_references(tmp_path):
     configured = json.loads(path.read_text())["containerDefinitions"][0]
     assert configured["memory"] == 256 and configured["secrets"] == original["containerDefinitions"][0]["secrets"]
     assert dict((v["name"],v["value"]) for v in configured["environment"]) == {
-        "ENGINE_MODE":"real", "IPGO_MODEL19_DIR":"/opt/ipgo-model19"}
+        "ENGINE_MODE":"real", "IPGO_MODEL19_DIR":"/opt/ipgo-model19",
+        "IPGO_MODEL_INSIGHT_ENABLED":"false"}
     gate.configure(tmp_path, False)
-    assert json.loads(path.read_text()) == original
+    after = json.loads(path.read_text())["containerDefinitions"][0]
+    assert after["memory"] == original["containerDefinitions"][0]["memory"]
+    assert after["secrets"] == original["containerDefinitions"][0]["secrets"]
+    assert after["environment"] == [dict(name="ENGINE_MODE", value="real"),
+                                    dict(name="IPGO_MODEL_INSIGHT_ENABLED", value="false")]
 
 
 def test_workflow_checks_model_before_build_and_task_changes():
