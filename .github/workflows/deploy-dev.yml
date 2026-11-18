@@ -22,6 +22,11 @@ on:
         required: false
         default: ""
         type: string
+      model_insight_enabled:
+        description: "Enable paid LGBM19 explanations; requires model19 and explicit LLM approval"
+        required: false
+        default: false
+        type: boolean
       acceptance_timing_enabled:
         description: "CALCULATE 단계 시간 로그 활성화(기본 꺼짐, 승인한 관측에만 사용)"
         required: false
@@ -100,6 +105,7 @@ jobs:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       MODEL19_ENABLED: ${{ inputs.model19_enabled }}
       MODEL19_VERSION: ${{ inputs.model19_version }}
+      MODEL_INSIGHT_ENABLED: ${{ inputs.model_insight_enabled }}
       CONTINUOUS_LLM_APPROVED: ${{ inputs.continuous_llm_approved }}
       IPGO_LLM_EXPIRES_AT: ${{ inputs.llm_expires_at }}
       COMPUTE_MODE: ${{ vars.AWS_DEV_COMPUTE_MODE }}
@@ -210,6 +216,8 @@ jobs:
         env:
           ENGINE_MODE: ${{ inputs.engine_mode }}
           IMAGE_EXISTS: ${{ steps.image_lookup.outputs.exists }}
+          LLM_ENABLED: ${{ inputs.llm_enabled }}
+          LLM_APPROVED: ${{ inputs.llm_approved }}
         run: python3 "$RUNNER_TEMP/model19_gate.py" guard
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
         if: steps.image_lookup.outputs.exists == 'false'

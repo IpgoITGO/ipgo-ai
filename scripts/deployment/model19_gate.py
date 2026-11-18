@@ -7,6 +7,15 @@ from pathlib import Path
 
 
 def validate(env):
+    model_insight = env.get("MODEL_INSIGHT_ENABLED", "false")
+    if model_insight not in ("true", "false"):
+        raise ValueError("MODEL_INSIGHT_ENABLED must be true or false")
+    if model_insight == "true" and not (
+        env.get("MODEL19_ENABLED") == "true"
+        and env.get("LLM_ENABLED") == "true"
+        and env.get("LLM_APPROVED") == "true"
+    ):
+        raise ValueError("Model explanations require model19 and explicit LLM approval")
     if env.get("MODEL19_ENABLED", "false") != "true":
         return
     if (env.get("ENGINE_MODE") != "real" or env.get("IMAGE_EXISTS") != "true"
@@ -14,7 +23,9 @@ def validate(env):
         raise ValueError("LGBM19 requires a real engine, existing immutable private image, and fixed version")
 
 
-def configure(directory, enabled):
+def configure(directory, enabled, model_insight_enabled=False):
+    if model_insight_enabled and not enabled:
+        raise ValueError("Model explanations require model19")
     paths = [directory / f"ai-{kind}-task-definition.json" for kind in ("api", "worker")]
     if not paths[0].is_file():
         raise ValueError("API task definition snapshot is missing")
@@ -25,7 +36,10 @@ def configure(directory, enabled):
         for container in task["containerDefinitions"]:
             if container["name"] not in ("ai-api", "ai-worker"):
                 continue
-            values = [v for v in container.get("environment", []) if v["name"] != "IPGO_MODEL19_DIR"]
+            values = [v for v in container.get("environment", [])
+                      if v["name"] not in ("IPGO_MODEL19_DIR", "IPGO_MODEL_INSIGHT_ENABLED")]
+            values.append({"name": "IPGO_MODEL_INSIGHT_ENABLED",
+                           "value": str(model_insight_enabled).lower()})
             if enabled:
                 values.append({"name":"IPGO_MODEL19_DIR", "value":"/opt/ipgo-model19"})
             container["environment"] = values
@@ -39,7 +53,8 @@ def main():
     if args.mode == "guard":
         validate(os.environ)
     else:
-        configure(Path(os.environ["RUNNER_TEMP"]), os.getenv("MODEL19_ENABLED") == "true")
+        configure(Path(os.environ["RUNNER_TEMP"]), os.getenv("MODEL19_ENABLED") == "true",
+                  os.getenv("MODEL_INSIGHT_ENABLED", "false") == "true")
 
 
 if __name__ == "__main__":
