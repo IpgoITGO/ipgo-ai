@@ -112,6 +112,15 @@ SQS는 at-least-once 전달을 전제로 `jobId` 또는 `runId`를 멱등성 기
 
 계산 불가(`NOT_CALCULABLE`)와 AI 대체 문장은 오류가 아니라 정상 응답 안의 상태값입니다.
 
+SQS worker의 `FAILED` 결과도 같은 원칙으로 `error.message`를 채웁니다.
+
+| 실패 | code | message |
+|---|---|---|
+| 계산 입력 오류(`CalculationInputError`) | `INVALID_INPUT` | 실제 이유 문장(#143). 비어 있으면 "입력값을 확인해 주세요." |
+| 정제 입력 오류(`CleaningInputError`) | `INVALID_SOURCE` | 실제 이유 문장(#94). 비어 있으면 "원본을 확인해 주세요." |
+| 요청 형식 오류(pydantic) | `INVALID_INPUT`·`INVALID_SOURCE` | 일반 문장 "입력값을 확인해 주세요." |
+| 엔진 장애·알 수 없는 오류 | — | 결과를 보내지 않고 재시도·DLQ로 남김 |
+
 ## 엔진 버전
 
 `engine/__init__.py`의 `ENGINE_VERSION`을 Spring이 계산 실행마다 저장해 결과를 재현합니다.

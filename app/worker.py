@@ -42,6 +42,8 @@ def process_message(body: str) -> ResultEnvelope:
         {JobType.CLEAN: CleanRequest, JobType.CALCULATE: CalculateRequest,
          JobType.BACKTEST: BacktestRequest}[job.job_type].model_validate(job.payload)
     except ValidationError:
+        # 요청 형식 오류는 Spring이 만든 payload 문제라 셀러가 고칠 수 없다. pydantic 문장에는
+        # 입력값·내부 필드 이름이 섞이므로 일반 문장을 유지한다(#143).
         code = "INVALID_SOURCE" if job.job_type is JobType.CLEAN else "INVALID_INPUT"
         return _failure(job, code, "입력값을 확인해 주세요.")
     try:
@@ -49,8 +51,9 @@ def process_message(body: str) -> ResultEnvelope:
     except CleaningInputError as exc:
         # 정제 오류 문장은 셀러가 고칠 내용을 담고 있어 그대로 보낸다(#94). HTTP 경로와 같은 문장이다.
         return _failure(job, "INVALID_SOURCE", str(exc) or "원본을 확인해 주세요.", exc.reason)
-    except CalculationInputError:
-        return _failure(job, "INVALID_INPUT", "입력값을 확인해 주세요.")
+    except CalculationInputError as exc:
+        # 계산 입력 오류도 셀러가 고칠 이유 문장이라 그대로 보낸다(#143). HTTP 422와 같은 문장이다.
+        return _failure(job, "INVALID_INPUT", str(exc) or "입력값을 확인해 주세요.")
     except NotImplementedError:
         return _failure(job, "NOT_IMPLEMENTED", "아직 구현되지 않은 계산 기능이에요.")
 
