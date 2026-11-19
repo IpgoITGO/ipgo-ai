@@ -13,6 +13,10 @@ from schemas.base import Method
 from schemas.engine import AccuracyEvaluation, CalculateRequest, CalculateResponse, ScenarioRequest, ScenarioResult
 
 
+class ModelBundleLoadError(core.CalculationInputError):
+    """모델 연결 실패를 구분하되 기존 HTTP 입력 오류 계약은 유지한다."""
+
+
 def _context(request: CalculateRequest, daily: pd.DataFrame):
     if request.policy.default_method is Method.LGBM19:
         return None
@@ -28,7 +32,7 @@ def _model_bundle(request):
     try:
         return load_bundle(get_settings().model19_directory, request.policy.model_version or "")
     except Model19Error as exc:
-        raise core.CalculationInputError(str(exc)) from exc
+        raise ModelBundleLoadError(str(exc)) from exc
 
 
 def _without_oversized(request: CalculateRequest, daily: pd.DataFrame):

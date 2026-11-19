@@ -117,6 +117,7 @@ SQS worker의 `FAILED` 결과도 같은 원칙으로 `error.message`를 채웁�
 | 실패 | code | message |
 |---|---|---|
 | 계산 입력 오류(`CalculationInputError`) | `INVALID_INPUT` | 실제 이유 문장(#143). 비어 있으면 "입력값을 확인해 주세요." |
+| 모델 연결 오류(`ModelBundleLoadError`) | `INVALID_INPUT` | 설정 세부사항 없이 "지금은 계산할 수 없어요. 잠시 후 다시 시도해 주세요." |
 | 정제 입력 오류(`CleaningInputError`) | `INVALID_SOURCE` | 실제 이유 문장(#94). 비어 있으면 "원본을 확인해 주세요." |
 | 요청 형식 오류(pydantic) | `INVALID_INPUT`·`INVALID_SOURCE` | 일반 문장 "입력값을 확인해 주세요." |
 | 엔진 장애·알 수 없는 오류 | — | 결과를 보내지 않고 재시도·DLQ로 남김 |

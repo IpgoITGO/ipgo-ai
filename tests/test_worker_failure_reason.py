@@ -84,6 +84,18 @@ def test_request_format_error_keeps_general_sentence():
     assert "private-value" not in result.model_dump_json()
 
 
+def test_model_bundle_load_failure_keeps_general_sentence(monkeypatch, tmp_path):
+    monkeypatch.setattr(jobs.repository, "load_product_daily", lambda *_a, **_k: pd.DataFrame())
+    monkeypatch.setenv("IPGO_MODEL19_DIR", str(tmp_path / "missing-bundle"))
+    payload = {**CALC_REQUEST, "policy": {"defaultMethod": "LGBM19", "modelVersion": "test-model"}}
+    queue = _run_worker(_body(payload))
+    message, = queue.published
+    assert message["status"] == "FAILED"
+    assert message["error"]["code"] == "INVALID_INPUT"
+    assert message["error"]["message"] == "지금은 계산할 수 없어요. 잠시 후 다시 시도해 주세요."
+    assert queue.deleted
+
+
 def test_engine_failure_publishes_nothing_internal(monkeypatch):
     # 엔진 장애·알 수 없는 오류는 결과 메시지를 만들지 않고 재시도(DLQ)로 남긴다. 내부 문장은 나가지 않는다.
     monkeypatch.setattr(jobs.repository, "load_product_daily", lambda *_a, **_k: pd.DataFrame())
