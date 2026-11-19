@@ -77,6 +77,9 @@ ruff check .                     # 코드 검사
 모델 인사이트 계약과 연결 순서는 [결정 0018](docs/decisions/0018-model-insight-contract.md)을 따릅니다.
 `IPGO_MODEL_INSIGHT_ENABLED` 기본값은 `false`입니다. OFF이면 LGBM19 계산 결과의
 `insightInput`은 null이며 모델 설명 HTTP 호출도 차단합니다. 기존 A/B prompt와 위험 상태는 유지합니다.
+개발 배포의 `model_insight_enabled` 입력은 기본 `false`입니다. ON은 비공개 모델19 이미지와
+명시적 LLM 비용 승인을 요구하며 Server의 같은 입력도 함께 켜야 합니다. 문제 시 두 입력을
+`false`로 재배포합니다. 앱 SHA와 모델 weight를 바꾸지 않고 스위치만 변경할 수 있습니다.
 
 | 이름 | 설명 | 기본값 |
 |---|---|---|
@@ -144,9 +147,14 @@ DB 미설정은 계산 성공으로 대체하지 않습니다. DB 연결 제한�
 - XLSX 원본은 10 MiB, 압축 해제 합계는 16 MiB 이하입니다. 1 MB를 넘는 항목의 압축비가
   1000배를 넘으면 거부합니다. 원본 행은 최대 100,000개, 정제 격자는 재고관리단위×일
   20,000개 및 상품×일 10,000개입니다. XLSX는 단일 파일이며 잘못된 원본은 `INVALID_SOURCE`입니다. worker 결과의 `error.message`에는 정제가 찾은 이유 문장을 그대로 담고, 전월 잔여 재고 단위가 이번 파일에 없으면 `error.details.reason = "PREVIOUS_MONTH_MISMATCH"`를 함께 보냅니다(#94). 서버는 이를 업로드 결과 `error.reason`·`error.details.reason`으로 내려 줍니다(server#164).
-- 상품별 `leadTimeDays + reviewCycleDays`는 최대 366일, `today - asOfDate`는 최대 730일,
+- 상품별 `leadTimeDays + reviewCycleDays`는 최대 366일입니다. 넘는 상품은 **그 상품만**
+  `NOT_CALCULABLE`(`reason`: "리드타임과 입고 주기를 합쳐 366일 이하로 넣어 주세요")로 돌려주고
+  나머지 상품은 계산합니다(#141). 예: 23 + 555 = 578일 상품 1개와 정상 상품 168개 → 168개는 결과,
+  578일 상품만 계산 불가. 직접 입력 시나리오에서 그 상품 하나만 고르면 같은 이유로 `INVALID_INPUT`입니다.
+- 요청 전체 제한은 그대로 요청 전체 실패(`INVALID_INPUT`)입니다. `today - asOfDate`는 최대 730일,
   계산 요청의 세 시나리오 예상 결과는 총 60,000개 상품·시나리오·일 이내이며
-  `Σ 3 × (leadTimeDays + reviewCycleDays)`로 계산합니다(선택한 상품만 합산).
+  `Σ 3 × (leadTimeDays + reviewCycleDays)`로 계산합니다(선택한 상품만 합산하고,
+  366일을 넘어 시나리오를 만들지 않는 상품은 빼요).
   예를 들어 상품 284개 × 시나리오 3개 × 19일은 16,188개입니다.
   DB 원본 조회는 150,000행 이내입니다. 초과하면 `INVALID_INPUT`입니다.
   결과 전송의 900,000바이트 및 압축 해제 후 16 MiB 제한은 별도로 유지합니다.
