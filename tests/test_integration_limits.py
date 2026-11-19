@@ -66,9 +66,9 @@ def test_capacity_boundaries():
     with pytest.raises(CalculationInputError):
         validate_calculation_capacity(req)
     req.today = req.as_of_date
+    # #141: 367일 상품은 요청 전체가 아니라 그 상품만 계산 불가로 돌려준다.
     req.settings[0].review_cycle_days = 366
-    with pytest.raises(CalculationInputError):
-        validate_calculation_capacity(req)
+    validate_calculation_capacity(req)
     req.settings[0].review_cycle_days = 365
     req.product_ids = None
     req.settings = [req.settings[0].model_copy(update={"product_id": n}) for n in range(55)]

@@ -7,6 +7,8 @@ from engine.calculate import CalculationInputError
 
 _lock = Lock()
 MAX_SCENARIO_POINTS = 60_000
+MAX_PRODUCT_HORIZON_DAYS = 366
+HORIZON_TOO_LONG_REASON = "리드타임과 입고 주기를 합쳐 366일 이하로 넣어 주세요"
 
 
 @contextmanager
@@ -19,16 +21,24 @@ def engine_slot():
         _lock.release()
 
 
+def oversized_products(request) -> set[int]:
+    """리드타임 + 입고 주기(일)가 366일을 넘는 상품 ID. 이 상품만 계산 불가로 돌려준다(#141)."""
+    return {s.product_id for s in request.settings
+            if s.lead_time_days + s.review_cycle_days > MAX_PRODUCT_HORIZON_DAYS}
+
+
 def validate_calculation_capacity(request):
-    """현재 서비스의 계산 용량 제한을 미리 확인한다."""
+    """요청 전체의 계산 용량 제한을 미리 확인한다. 넘으면 요청 전체가 실패한다.
+
+    시나리오 점수(개) = Σ 3 × (리드타임 + 입고 주기)일, 선택한 상품만 합산한다.
+    366일을 넘는 상품은 시나리오를 만들지 않으므로 합산하지 않는다.
+    """
     gap = (request.today - request.as_of_date).days
     if gap > 730:
         raise CalculationInputError("기준일과 오늘 사이 간격은 최대 730일을 지원해요")
-    settings = request.settings
-    if any(s.lead_time_days + s.review_cycle_days > 366 for s in settings):
-        raise CalculationInputError("상품별 계산 기간은 최대 366일을 지원해요")
+    oversized = oversized_products(request)
     selected = set(request.product_ids) if request.product_ids is not None else None
-    points = sum(3 * (s.lead_time_days + s.review_cycle_days) for s in settings
-                 if selected is None or s.product_id in selected)
+    points = sum(3 * (s.lead_time_days + s.review_cycle_days) for s in request.settings
+                 if (selected is None or s.product_id in selected) and s.product_id not in oversized)
     if points > MAX_SCENARIO_POINTS:
         raise CalculationInputError("시나리오 예상 결과의 지원 크기를 초과했어요")
