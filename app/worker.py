@@ -14,6 +14,7 @@ from botocore.config import Config
 from pydantic import ValidationError
 
 from app import calculation_timing
+from app.calculation import ModelBundleLoadError
 from app.config import get_settings
 from app.jobs import JobEnvelope, JobError, JobErrorDetails, JobStatus, JobType, ResultEnvelope, execute
 from app.result_transport import MAX_RESULT_BYTES as MAX_RESULT_BYTES
@@ -42,6 +43,8 @@ def process_message(body: str) -> ResultEnvelope:
         {JobType.CLEAN: CleanRequest, JobType.CALCULATE: CalculateRequest,
          JobType.BACKTEST: BacktestRequest}[job.job_type].model_validate(job.payload)
     except ValidationError:
+        # 요청 형식 오류는 Spring이 만든 payload 문제라 셀러가 고칠 수 없다. pydantic 문장에는
+        # 입력값·내부 필드 이름이 섞이므로 일반 문장을 유지한다(#143).
         code = "INVALID_SOURCE" if job.job_type is JobType.CLEAN else "INVALID_INPUT"
         return _failure(job, code, "입력값을 확인해 주세요.")
     try:
@@ -49,8 +52,12 @@ def process_message(body: str) -> ResultEnvelope:
     except CleaningInputError as exc:
         # 정제 오류 문장은 셀러가 고칠 내용을 담고 있어 그대로 보낸다(#94). HTTP 경로와 같은 문장이다.
         return _failure(job, "INVALID_SOURCE", str(exc) or "원본을 확인해 주세요.", exc.reason)
-    except CalculationInputError:
-        return _failure(job, "INVALID_INPUT", "입력값을 확인해 주세요.")
+    except ModelBundleLoadError:
+        logger.warning("calculation model bundle unavailable")
+        return _failure(job, "INVALID_INPUT", "지금은 계산할 수 없어요. 잠시 후 다시 시도해 주세요.")
+    except CalculationInputError as exc:
+        # 모델 연결 오류와 달리 계산 입력 오류는 수정에 필요한 이유를 보낸다(#143).
+        return _failure(job, "INVALID_INPUT", str(exc) or "입력값을 확인해 주세요.")
     except NotImplementedError:
         return _failure(job, "NOT_IMPLEMENTED", "아직 구현되지 않은 계산 기능이에요.")
 
