@@ -3,7 +3,6 @@ import json
 import unittest
 from pathlib import Path
 
-
 DEPLOYMENT = Path(__file__).resolve().parents[2] / "scripts" / "deployment"
 SHARED_FILES = {"check_ecr_image.py", "summarize_timing.py"}
 
