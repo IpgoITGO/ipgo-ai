@@ -162,7 +162,10 @@ def _model_product(request, daily, product_id, settings, closing, valid_days, bu
     # 보고서 정책에는 도착 전 미충족을 추가 차감하는 항이 없다.
     stock = start_stock(closing, prediction.p50 / 19, gap, before)
     baseline = simulate(stock, [prediction.p50 / 19] * 19, 0, 5, planned)
-    need = max(0., prediction.target - stock - sum(planned.values()) - 1e-12)
+    target_gap = prediction.target - stock - sum(planned.values())
+    # 늦은 입고가 신규 주문으로 막을 수 있는 공백을 가리지 않도록 한다.
+    post_arrival_gap = baseline.post_arrival_unmet if any(day > 5 and qty > 0 for day, qty in planned.items()) else 0.
+    need = max(0., max(target_gap, post_arrival_gap) - 1e-12)
     qty = round_to_order_unit(need, settings.order_unit_qty)
     past = stockout_since(request.as_of_date, closing, prediction.p50 / 19, gap, before) if stock <= 0 else None
     future = request.today + timedelta(days=baseline.depletion_day) if baseline.depletion_day else None
